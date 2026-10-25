@@ -1,18 +1,67 @@
 use bevy::prelude::*;
 
-const DIRT_COLOR: (f32, f32, f32) = (155.0/255.0, 118.0/255.0, 83.0/255.0);
-const GRASS_COLOR: (f32, f32, f32) = (0.1, 0.3, 0.03);
-const LAVA_COLOR: (f32, f32, f32) = (1.0, 0.1, 0.1);
-
-const TILE_SIZE: f32 = 32.0;
 const PLAYER_SIZE: Vec2 = vec2(26.0, 32.0 * 1.5);
 
-// Make TileTypes a component so can easily select them
+const LEVEL: &[&str] = &[
+    "....G......G....................",
+    ".....................G..........",
+    "............................L...",
+    "............................D...",
+    "....GG.......GGG................",
+    "................................",
+    "GGGLLLLLLLLLLLLL................",
+    "DDDDDDDDDDDDDDDD................",
+];
+
+#[derive(Clone, Copy, Debug)]
+pub struct TileAttributes {
+    pub color: (f32, f32, f32),
+    pub size: Vec2, // Overall dimensions of tile
+    pub damage_on_touch: i32,
+    pub speed_multiplier: f32,
+    pub is_solid: bool, // Whether or not collisions with other entities occur
+}
+
+// Make it so you don't have to type every single attribute all the time
+impl Default for TileAttributes {
+    fn default() -> Self {
+        Self {
+            color: (0.0, 0.0, 0.0),
+            size: vec2(32.0, 32.0),
+            damage_on_touch: 0,
+            speed_multiplier: 1.0,
+            is_solid: true,
+        }
+    }
+}
+
+// Make Tiles components so we easily select them
 #[derive(Component, Copy, Clone, PartialEq)]
-enum TileType {
+enum Tile {
     Dirt,
     Grass,
     Lava,
+}
+impl Tile {
+    pub fn attributes(&self) -> TileAttributes {
+        match self {
+            Tile::Dirt => TileAttributes {
+                color: (0.6078, 0.4627, 0.3255),
+                ..Default::default()
+            },
+            Tile::Grass => TileAttributes {
+                color: (0.1, 0.3, 0.03),
+                ..Default::default()
+            },
+            Tile::Lava => TileAttributes {
+                color: (1.0, 0.1, 0.1),
+                speed_multiplier: 0.3,
+                is_solid: false,
+                damage_on_touch: 1,
+                ..Default::default()
+            },
+        }
+    }
 }
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -100,58 +149,15 @@ fn setup(mut commands: Commands) {
     // Make camera
     commands.spawn(Camera2d);
 
-    // Make tiles
-    let tiles: &[(i32, i32, TileType)] = &[
-        (0, 0, TileType::Dirt),
-        (0, 1, TileType::Grass),
-        (1, 0, TileType::Dirt),
-        (1, 1, TileType::Grass),
-        (2, 0, TileType::Dirt),
-        (2, 1, TileType::Grass),
-        (4, 1, TileType::Grass),
-        (5, 1, TileType::Dirt),
-        (6, 1, TileType::Grass),
-        (8, 2, TileType::Grass),
-        (10, 4, TileType::Dirt),
-        (12, 4, TileType::Lava),
-        (12, 3, TileType::Dirt),
-    ];
-
-    for tile in tiles {
-        if tile.2 != TileType::Lava {
-            commands.spawn((
-                Sprite::from_color(
-                    match tile.2 {
-                        TileType::Dirt => Color::srgb(DIRT_COLOR.0, DIRT_COLOR.1, DIRT_COLOR.2),
-                        TileType::Grass => Color::srgb(GRASS_COLOR.0, GRASS_COLOR.1, GRASS_COLOR.2),
-                        _ => Color::srgb(0.0,0.0,0.0),
-                    },
-                    Vec2::splat(TILE_SIZE),
-                ),
-                Transform::from_xyz(
-                    tile.0 as f32 * TILE_SIZE,
-                    tile.1 as f32 * TILE_SIZE,
-                    0.0,
-                ),
-                SolidTile,
-                tile.2,
-            ));
-        } else {
-            commands.spawn((
-                Sprite::from_color(
-                    match tile.2 {
-                        TileType::Lava => Color::srgb(LAVA_COLOR.0, LAVA_COLOR.1, LAVA_COLOR.2),
-                        _ => Color::srgb(0.0,0.0,0.0),
-                    },
-                    Vec2::splat(TILE_SIZE),
-                ),
-                Transform::from_xyz(
-                    tile.0 as f32 * TILE_SIZE,
-                    tile.1 as f32 * TILE_SIZE,
-                    0.0,
-                ),
-                tile.2,
-            ));
+    for (i, row) in LEVEL.into_iter().rev().enumerate() {
+        for (j, column) in row.chars().enumerate() {
+            match column {
+                '.' => continue,
+                'D' => spawn_block(&mut commands, Tile::Dirt, (j, i)),
+                'G' => spawn_block(&mut commands, Tile::Grass, (j, i)),
+                'L' => spawn_block(&mut commands, Tile::Lava, (j, i)),
+                _ => ()
+            }
         }
     }
 
@@ -167,6 +173,26 @@ fn setup(mut commands: Commands) {
         Health::new(3),
         DamageCooldown::new(1.0)
     ));
+}
+
+fn spawn_block(commands: &mut Commands, tile: Tile, dims: (usize, usize)) {
+    let attributes = tile.attributes();
+
+    let sprite = Sprite::from_color(
+        Color::srgb(tile.attributes().color.0, tile.attributes().color.1, tile.attributes().color.2),
+        tile.attributes().size,
+    );
+    let transform = Transform::from_xyz(
+        dims.0 as f32 * tile.attributes().size.x,
+        dims.1 as f32 * tile.attributes().size.y,
+        0.0,
+    );
+
+    if attributes.is_solid {
+        commands.spawn((sprite, transform, SolidTile, tile));
+    } else {
+        commands.spawn((sprite, transform, tile));
+    }
 }
 
 fn process_controls(keyboard: Res<ButtonInput<KeyCode>>, mut player: Query<&mut Movement, With<Player>>) {
@@ -194,42 +220,48 @@ fn process_controls(keyboard: Res<ButtonInput<KeyCode>>, mut player: Query<&mut 
     }
 }
 
-fn move_player(time: Res<Time>, query: Query<(&mut Transform, &mut Movement), With<Player>>, solids: Query<&Transform, (With<SolidTile>, Without<Player>)>) {
-    for (mut transform, mut movement) in query {
+fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement), With<Player>>, tiles: Query<(&Transform, &Tile), Without<Player>>, mut camera: Query<&mut Transform, (With<Camera>, Without<Player>, Without<Tile>)>,) {
+    for (mut player_transform, mut movement) in &mut player {
         let dt = time.delta_secs();
 
         // Resolve x-axis collisions to prevent phasing through wall when falling
-        transform.translation.x += dt * movement.velocity.x;
+        player_transform.translation.x += dt * movement.velocity.x;
 
-        for solid in solids.iter() {
-            if (transform.translation.x - solid.translation.x).abs() < ((PLAYER_SIZE.x + TILE_SIZE) / 2.0)
-                && (transform.translation.y - solid.translation.y).abs() < ((PLAYER_SIZE.y + TILE_SIZE) / 2.0) {
+        for (tile_transform, tile) in &tiles {
+            if !tile.attributes().is_solid {
+                continue;
+            }
+            if (player_transform.translation.x - tile_transform.translation.x).abs() < ((PLAYER_SIZE.x + tile.attributes().size.x) / 2.0)
+                && (player_transform.translation.y - tile_transform.translation.y).abs() < ((PLAYER_SIZE.y + tile.attributes().size.y) / 2.0) {
                 // Push player out of the wall horizontally
                 if movement.velocity.x > 0.0 {
-                    transform.translation.x = solid.translation.x - (PLAYER_SIZE.x + TILE_SIZE) / 2.0;
+                    player_transform.translation.x = tile_transform.translation.x - (PLAYER_SIZE.x + tile.attributes().size.x) / 2.0;
                 } else if movement.velocity.x < 0.0 {
-                    transform.translation.x = solid.translation.x + (PLAYER_SIZE.x + TILE_SIZE) / 2.0;
+                    player_transform.translation.x = tile_transform.translation.x + (PLAYER_SIZE.x + tile.attributes().size.y) / 2.0;
                 }
             }
         }
 
         // Resolve y-axis collisions next
-        transform.translation.y += dt * movement.velocity.y;
+        player_transform.translation.y += dt * movement.velocity.y;
 
         let mut on_ground = false;
 
-        for solid in solids.iter() {
-            if (transform.translation.x - solid.translation.x).abs() < ((PLAYER_SIZE.x + TILE_SIZE) / 2.0)
-                && (transform.translation.y - solid.translation.y).abs() < ((PLAYER_SIZE.y + TILE_SIZE) / 2.0) {
+        for (tile_transform, tile) in &tiles {
+            if !tile.attributes().is_solid {
+                continue;
+            }
+            if (player_transform.translation.x - tile_transform.translation.x).abs() < ((PLAYER_SIZE.x + tile.attributes().size.x) / 2.0)
+                && (player_transform.translation.y - tile_transform.translation.y).abs() < ((PLAYER_SIZE.y + tile.attributes().size.y) / 2.0) {
                 if movement.velocity.y <= 0.0 {
                     // Landing on top of a tile
                     on_ground = true;
-                    transform.translation.y = solid.translation.y + (TILE_SIZE + PLAYER_SIZE.y) / 2.0;
+                    player_transform.translation.y = tile_transform.translation.y + (PLAYER_SIZE.y + tile.attributes().size.y) / 2.0;
                     // Reset number of jumps
                     movement.number_of_jumps = 0;
                 } else {
                     // Hitting head on tile
-                    transform.translation.y = solid.translation.y - (TILE_SIZE + PLAYER_SIZE.y) / 2.0;
+                    player_transform.translation.y = tile_transform.translation.y - (tile.attributes().size.y + PLAYER_SIZE.y) / 2.0;
                 }
                 movement.velocity.y = 0.0;
             }
@@ -241,6 +273,13 @@ fn move_player(time: Res<Time>, query: Query<(&mut Transform, &mut Movement), Wi
             // Set terminal velocity
             movement.velocity.y = (movement.velocity.y - gravity * dt).max(-500.0);
         }
+
+        // Move camera
+        let Ok(mut camera_transform) = camera.single_mut() else {
+            return;
+        };
+        camera_transform.translation.x = player_transform.translation.x;
+        camera_transform.translation.y = player_transform.translation.y;
     }
 }
 
@@ -250,7 +289,7 @@ fn process_environment(
         (&Transform, &mut Health, &mut DamageCooldown),
         With<Player>,
     >,
-    tiles: Query<(&Transform, &TileType)>,
+    tiles: Query<(&Transform, &Tile)>,
 ) {
     let Ok((player_transform, mut health, mut cooldown)) =
         player.single_mut()
@@ -268,14 +307,15 @@ fn process_environment(
 
     let player_pos = player_transform.translation.truncate();
 
-    for (tile_transform, tile_type) in &tiles {
-        if *tile_type != TileType::Lava {
+    for (tile_transform, tile) in &tiles {
+        // Skip tiles that don't affect player health
+        if tile.attributes().damage_on_touch == 0 {
             continue;
         }
 
         let touching_lava =
-            (player_pos.x - tile_transform.translation.truncate().x).abs() < (PLAYER_SIZE.x + TILE_SIZE) / 2.0
-            && (player_pos.y - tile_transform.translation.truncate().y).abs() < (PLAYER_SIZE.y + TILE_SIZE) / 2.0;
+            (player_pos.x - tile_transform.translation.truncate().x).abs() < (PLAYER_SIZE.x + tile.attributes().size.x) / 2.0
+            && (player_pos.y - tile_transform.translation.truncate().y).abs() < (PLAYER_SIZE.y + tile.attributes().size.y) / 2.0;
 
         // Only damage when touching lava and cooldown complete
         if touching_lava && !cooldown.active {
