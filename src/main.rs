@@ -3,17 +3,20 @@ use bevy::prelude::*;
 const PLAYER_SIZE: Vec2 = vec2(26.0, 32.0 * 1.5);
 const TILE_SIZE: f32 = 32.0;
 
+// Give player grace period to jump after walking off edge
+const COYOTE_TIME: f32 = 0.1;
+
 const LEVEL: &[&str] = &[
     ".......................................C..................",
     "...........................C..............................",
     ".................C........................................",
-    "......................P...................................",
+    "..........................................................",
     "..........................................................",
     "......................D...........G........GGGG.......LLLD",
-    "......................D.......................DGGG..G.LDDD",
+    "......................D.......................DG..GGG.LDDD",
     "......................DW.............................L...",
     "......................DGG............C................L...",
-    "......................DDD.............................L...",
+    "......................DDD......................P......L...",
     "...............................................G......L...",
     "......................................................L...",
     "......................................................L...",
@@ -40,12 +43,13 @@ const LEVEL: &[&str] = &[
 #[derive(Clone, Copy, Debug)]
 pub struct TileAttributes {
     pub color: (f32, f32, f32),
-    pub animate_color: Option<(f32, f32, f32)>,
-    pub animate_speed: Option<f32>,
+    pub animate_color: Option<(f32, f32, f32)>, // Color the tile will fade to
+    pub animate_speed: Option<f32>, // Speed at which tile will fade to different color; lower value is slower; higher value is faster
     pub size: Vec2, // Overall dimensions of tile; it will prob break stuff if this is changed lol
-    pub damage_on_touch: u32,
-    pub has_damage_cooldown: bool,
-    pub speed_multiplier: f32,
+    pub damage: u32, // The amount of damage the tile inflicts on the player when they touch it
+    pub has_damage_cooldown: bool, // Whether the damage cooldown is applied to the tile
+    pub speed_multiplier: f32, // How much the tile impacts user speed
+    pub bounce: f32, // Amount of bounce a tile has; Not implemented yet
     pub is_solid: bool, // Whether or not collisions with other entities occur
 }
 
@@ -57,9 +61,10 @@ impl Default for TileAttributes {
             animate_color: None,
             animate_speed: None, // Higher number is faster animation
             size: vec2(32.0, 32.0),
-            damage_on_touch: 0,
+            damage: 0,
             has_damage_cooldown: true,
             speed_multiplier: 1.0,
+            bounce: 0.0,
             is_solid: true,
         }
     }
@@ -72,8 +77,8 @@ enum Tile {
     Grass,
     Lava,
     Bedrock,
-    Win,
     Coin,
+    Win, // Tile that user needs to contact to win the game
 }
 impl Tile {
     pub fn attributes(&self) -> TileAttributes {
@@ -92,11 +97,11 @@ impl Tile {
                 animate_speed: Some(0.5),
                 speed_multiplier: 0.3,
                 is_solid: false,
-                damage_on_touch: 1,
+                damage: 1,
                 ..Default::default()
             },
             Tile::Bedrock => TileAttributes {
-                damage_on_touch: 10000,
+                damage: 10000,
                 has_damage_cooldown: false,
                 is_solid: false,
                 ..Default::default()
@@ -135,6 +140,7 @@ struct Movement {
     velocity: Vec2, // Velocity without speed multiplied
     speed_multiplier: f32,
     number_of_jumps: u8,
+    coyote_time_remaining: f32,
 }
 
 #[derive(Component)]
@@ -170,6 +176,9 @@ struct ScoreText;
 struct Score(u32);
 
 #[derive(Component)]
+struct InitialMessage(Timer);
+
+#[derive(Component)]
 struct SolidTile;
 
 #[derive(Component)]
@@ -187,6 +196,30 @@ impl DamageCooldown {
     }
 }
 
+#[derive(Component)]
+struct DamageFlash {
+    timer: Timer,
+    active: bool,
+}
+
+impl DamageFlash {
+    fn new(duration: f32) -> Self {
+        Self {
+            timer: Timer::from_seconds(duration, TimerMode::Once),
+            active: false,
+        }
+    }
+}
+
+#[derive(Component)]
+struct GameEntity;
+
+#[derive(Component)]
+struct EndScreenRoot;
+
+#[derive(Component)]
+struct RestartButton;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -197,17 +230,29 @@ fn main() {
             }),
             ..default()
         }))
-        .add_systems(Startup, setup)
-
+        .add_systems(Startup, (setup, show_initial_message))
         .add_systems(Update, (
+            hide_initial_message,
             process_controls,
             move_player,
             process_environment,
             check_game_over,
         ).chain().run_if(in_state(GameState::InGame)))
+        .add_systems(
+        Update,
+        update_damage_flash
+            .after(process_environment)
+            .run_if(in_state(GameState::InGame)),
+        )
         .add_systems(Update,update_game_ui
             .after(process_environment)
             .run_if(in_state(GameState::InGame)),
+        )
+        .add_systems(
+            Update,
+            restart_button_system
+                .after(update_game_ui)
+                .after(check_game_over),
         )
 
         .add_systems(OnEnter(GameState::GameLost), show_game_lost)
@@ -247,16 +292,22 @@ fn setup(mut commands: Commands) {
         ScoreText,
     ));
 
+    // Create level
+    spawn_level(&mut commands);
+}
+
+// Read tilemap to spawn all tiles
+fn spawn_level(commands: &mut Commands) {
     for (i, row) in LEVEL.into_iter().rev().enumerate() {
         for (j, column) in row.chars().enumerate() {
             match column {
                 '.' => continue,
-                'D' => spawn_block(&mut commands, Tile::Dirt, (j, i)),
-                'G' => spawn_block(&mut commands, Tile::Grass, (j, i)),
-                'L' => spawn_block(&mut commands, Tile::Lava, (j, i)),
-                'B' => spawn_block(&mut commands, Tile::Bedrock, (j, i)),
-                'W' => spawn_block(&mut commands, Tile::Win, (j, i)),
-                'C' => spawn_block(&mut commands, Tile::Coin, (j, i)),
+                'D' => spawn_block(commands, Tile::Dirt, (j, i)),
+                'G' => spawn_block(commands, Tile::Grass, (j, i)),
+                'L' => spawn_block(commands, Tile::Lava, (j, i)),
+                'B' => spawn_block(commands, Tile::Bedrock, (j, i)),
+                'W' => spawn_block(commands, Tile::Win, (j, i)),
+                'C' => spawn_block(commands, Tile::Coin, (j, i)),
                 'P' => {
                     // Draw player
                     commands.spawn((
@@ -266,13 +317,16 @@ fn setup(mut commands: Commands) {
                         ),
                         Transform::from_xyz(j as f32 * TILE_SIZE, i as f32 * TILE_SIZE, 1.0),
                         Player,
+                        GameEntity,
                         Movement {
                             velocity: vec2(0.0, 0.0),
                             speed_multiplier: 1.0,
                             number_of_jumps: 0,
+                            coyote_time_remaining: 0.0,
                         },
                         Health::new(2),
-                        DamageCooldown::new(1.0)
+                        DamageCooldown::new(1.0),
+                        DamageFlash::new(0.15),
                     ));
                 }
                 _ => ()
@@ -281,13 +335,19 @@ fn setup(mut commands: Commands) {
     }
 }
 
+// Helper function to create the entity for a tile
 fn spawn_block(commands: &mut Commands, tile: Tile, dims: (usize, usize)) {
     let attributes = tile.attributes();
 
     let sprite = Sprite::from_color(
-        Color::srgb(tile.attributes().color.0, tile.attributes().color.1, tile.attributes().color.2),
-        tile.attributes().size,
+        Color::srgb(
+            attributes.color.0,
+            attributes.color.1,
+            attributes.color.2,
+        ),
+        attributes.size,
     );
+
     let transform = Transform::from_xyz(
         dims.0 as f32 * TILE_SIZE,
         dims.1 as f32 * TILE_SIZE,
@@ -295,12 +355,24 @@ fn spawn_block(commands: &mut Commands, tile: Tile, dims: (usize, usize)) {
     );
 
     if attributes.is_solid {
-        commands.spawn((sprite, transform, SolidTile, tile));
+        commands.spawn((
+            sprite,
+            transform,
+            SolidTile,
+            tile,
+            GameEntity,
+        ));
     } else {
-        commands.spawn((sprite, transform, tile));
+        commands.spawn((
+            sprite,
+            transform,
+            tile,
+            GameEntity,
+        ));
     }
 }
 
+// User controls
 fn process_controls(keyboard: Res<ButtonInput<KeyCode>>, mut player: Query<&mut Movement, With<Player>>) {
     let Ok(mut movement) = player.single_mut() else {
         return;
@@ -320,12 +392,20 @@ fn process_controls(keyboard: Res<ButtonInput<KeyCode>>, mut player: Query<&mut 
     movement.velocity.x = direction * 100.0;
 
     // Can only jumps twice in air
-    if (keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::ArrowUp)) && movement.number_of_jumps < 2 {
-        movement.velocity.y = 300.0;
-        movement.number_of_jumps += 1;
+    let jump_pressed = keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::ArrowUp);
+    if jump_pressed {
+        if movement.number_of_jumps == 0 && movement.coyote_time_remaining > 0.0 {
+            movement.velocity.y = 300.0;
+            movement.number_of_jumps = 1;
+            movement.coyote_time_remaining = 0.0;
+        } else if movement.number_of_jumps == 1 {
+            movement.velocity.y = 300.0;
+            movement.number_of_jumps = 2;
+        }
     }
 }
 
+// Player and camera movement
 fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement), With<Player>>, tiles: Query<(&Transform, &Tile), Without<Player>>, mut camera: Query<&mut Transform, (With<Camera>, Without<Player>, Without<Tile>)>,) {
     for (mut player_transform, mut movement) in &mut player {
         let dt = time.delta_secs();
@@ -343,7 +423,7 @@ fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement
                 if movement.velocity.x > 0.0 {
                     player_transform.translation.x = tile_transform.translation.x - (PLAYER_SIZE.x + tile.attributes().size.x) / 2.0;
                 } else if movement.velocity.x < 0.0 {
-                    player_transform.translation.x = tile_transform.translation.x + (PLAYER_SIZE.x + tile.attributes().size.y) / 2.0;
+                    player_transform.translation.x = tile_transform.translation.x + (PLAYER_SIZE.x + tile.attributes().size.x) / 2.0;
                 }
             }
         }
@@ -363,14 +443,21 @@ fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement
                     // Landing on top of a tile
                     on_ground = true;
                     player_transform.translation.y = tile_transform.translation.y + (PLAYER_SIZE.y + tile.attributes().size.y) / 2.0;
-                    // Reset number of jumps
-                    movement.number_of_jumps = 0;
                 } else {
                     // Hitting head on tile
                     player_transform.translation.y = tile_transform.translation.y - (tile.attributes().size.y + PLAYER_SIZE.y) / 2.0;
                 }
                 movement.velocity.y = 0.0;
             }
+        }
+
+        if on_ground {
+            // Reset number of jumps & coyote time when touch ground
+            movement.number_of_jumps = 0;
+            movement.coyote_time_remaining = COYOTE_TIME;
+        } else { // Count coyote time in air
+            // Tick timer
+            movement.coyote_time_remaining = (movement.coyote_time_remaining - dt).max(0.0);
         }
 
         // Only apply gravity if not on ground
@@ -380,24 +467,29 @@ fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement
             movement.velocity.y = (movement.velocity.y - gravity * dt).max(-500.0);
         }
 
-        // Move camera
         let Ok(mut camera_transform) = camera.single_mut() else {
             return;
         };
-        camera_transform.translation.x = player_transform.translation.x;
-        camera_transform.translation.y = player_transform.translation.y;
+
+        // Ease-out camera movement so it looks nice
+        let smoothing = 1.0 - (1.0 - dt).powf(3.0);
+
+        // Move camera
+        camera_transform.translation.x += (player_transform.translation.x - camera_transform.translation.x) * smoothing;
+        camera_transform.translation.y += (player_transform.translation.y - camera_transform.translation.y) * smoothing;
     }
 }
 
+// Process tiles and stuff
 fn process_environment(
     mut commands: Commands,
     mut next_state: ResMut<NextState<GameState>>,
     time: Res<Time>,
     mut score: ResMut<Score>,
-    mut player: Query<(&Transform, &mut Movement, &mut Health, &mut DamageCooldown), With<Player>>,
+    mut player: Query<(&Transform, &mut Movement, &mut Health, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
     mut tiles: Query<(Entity, &Transform, &mut Sprite, &Tile), Without<Player>>,
 ) {
-    let Ok((player_transform, mut movement, mut health, mut cooldown)) = player.single_mut()
+    let Ok((player_transform, mut movement, mut health, mut cooldown, mut damage_flash)) = player.single_mut()
     else {
         return;
     };
@@ -431,8 +523,8 @@ fn process_environment(
         }
 
         let touching_tile =
-            (player_pos.x - tile_transform.translation.truncate().x).abs() < (PLAYER_SIZE.x + tile.attributes().size.x) / 2.0
-            && (player_pos.y - tile_transform.translation.truncate().y).abs() < (PLAYER_SIZE.y + tile.attributes().size.y) / 2.0;
+            (player_pos.x - tile_transform.translation.truncate().x).abs() < (PLAYER_SIZE.x + attributes.size.x) / 2.0
+            && (player_pos.y - tile_transform.translation.truncate().y).abs() < (PLAYER_SIZE.y + attributes.size.y) / 2.0;
         if !touching_tile {
             continue;
         }
@@ -454,14 +546,43 @@ fn process_environment(
         }
 
         // Only damage when touching tile that does damage and cooldown is over or tile has no cooldown
-        if tile.attributes().damage_on_touch > 0 && (!cooldown.active || !tile.attributes().has_damage_cooldown) {
-            health.damage(tile.attributes().damage_on_touch);
-            cooldown.timer.reset();
-            cooldown.active = true;
+        if attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown) {
+            health.damage(attributes.damage);
+            damage_flash.timer.reset();
+            damage_flash.active = true;
+
+            // Only start cooldown for tiles that use one.
+            if attributes.has_damage_cooldown {
+                cooldown.timer.reset();
+                cooldown.active = true;
+            }
         }
     }
 }
 
+// Flash player a different color when they are hurt
+fn update_damage_flash(time: Res<Time>, mut player: Query<(&mut Sprite, &mut DamageFlash), With<Player>>) {
+    let Ok((mut sprite, mut flash)) = player.single_mut() else {
+        return;
+    };
+
+    if flash.active {
+        // Advance timer
+        flash.timer.tick(time.delta());
+
+        if flash.timer.is_finished() {
+            flash.active = false;
+            sprite.color = Color::srgb(0.95, 0.35, 0.25);
+        } else {
+            // Timer running so set player to white
+            sprite.color = Color::WHITE;
+        }
+    } else {
+        sprite.color = Color::srgb(0.95, 0.35, 0.25);
+    }
+}
+
+// Update HUDs
 fn update_game_ui(
     player: Query<&Health, With<Player>>,
     score: Res<Score>,
@@ -485,8 +606,9 @@ fn update_game_ui(
     }
 }
 
-fn check_game_over(mut next_state: ResMut<NextState<GameState>>, player: Query<(&Transform, &Health), With<Player>>) {
-    let Ok((transform, health)) = player.single() else {
+// Check if player dead, if so queue death screen
+fn check_game_over(mut next_state: ResMut<NextState<GameState>>, player: Query<&Health, With<Player>>) {
+    let Ok(health) = player.single() else {
         return;
     };
 
@@ -495,6 +617,7 @@ fn check_game_over(mut next_state: ResMut<NextState<GameState>>, player: Query<(
     }
 }
 
+// Show start message
 fn show_initial_message(mut commands: Commands) {
     commands.spawn((
         Node {
@@ -504,44 +627,138 @@ fn show_initial_message(mut commands: Commands) {
             align_items: AlignItems::Center,
             ..default()
         },
+        InitialMessage(Timer::from_seconds(4.0, TimerMode::Once))
     )).with_children(|parent| {
         parent.spawn((
-            Text::new("You won!"),
-            TextColor(Color::srgb(0.0, 1.0, 0.0)),
+            Text::new("Get to the color-changing block at the top to win. Try to collect as many coins as you can and avoid the lava!"),
+            TextColor(Color::srgb(0.0, 1.0, 1.0)),
         ));
     });
 }
 
+// Called every loop to wait until it is time to hide the initial message
+fn hide_initial_message(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut messages: Query<(Entity, &mut InitialMessage)>,
+) {
+    for (entity, mut message) in &mut messages {
+        message.0.tick(time.delta());
+
+        if message.0.is_finished() {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+// Game over message
 fn show_game_lost(mut commands: Commands) {
-    commands.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-    )).with_children(|parent| {
-        parent.spawn((
-            Text::new("GAME OVER"),
-            TextColor(Color::srgb(1.0, 0.0, 0.0)),
-        ));
-    });
+    show_end_screen(
+        &mut commands,
+        "Game Over!",
+        Color::srgb(1.0, 0.0, 0.0),
+    );
 }
 
+// Winner message
 fn show_game_won(mut commands: Commands) {
-    commands.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-    )).with_children(|parent| {
-        parent.spawn((
-            Text::new("You won!"),
-            TextColor(Color::srgb(0.0, 1.0, 0.0)),
-        ));
-    });
+    show_end_screen(
+        &mut commands,
+        "You won!",
+        Color::srgb(0.0, 1.0, 0.0),
+    );
+}
+
+// End screen general template function
+fn show_end_screen(commands: &mut Commands, message: &str, message_color: Color) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            EndScreenRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new(message),
+                TextColor(message_color),
+            ));
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        margin: UiRect {
+                            top: px(24),
+                            ..default()
+                        },
+                        padding: UiRect::all(px(12)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                    RestartButton,
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new("Restart"),
+                        TextColor(Color::WHITE),
+                    ));
+                });
+        });
+}
+
+// Monitor for restart button interactions and reset level when butotn pressed
+fn restart_button_system(
+    mut commands: Commands,
+    mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<RestartButton>)>,
+    world_entities: Query<Entity, With<GameEntity>>,
+    end_screens: Query<Entity, With<EndScreenRoot>>,
+    mut score: ResMut<Score>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    let mut restart_requested = false;
+
+    // Button interaction colors
+    for (interaction, mut background) in &mut buttons {
+        match *interaction {
+            Interaction::Pressed => {
+                *background = BackgroundColor(Color::srgb(0.1, 0.5, 0.2));
+                restart_requested = true;
+            }
+            Interaction::Hovered => {
+                *background = BackgroundColor(Color::srgb(0.3, 0.3, 0.3));
+            }
+            Interaction::None => {
+                *background = BackgroundColor(Color::srgb(0.15, 0.15, 0.15));
+            }
+        }
+    }
+
+    if !restart_requested {
+        return;
+    }
+
+    // Despawn all entities
+    for entity in &world_entities {
+        commands.entity(entity).despawn();
+    }
+
+    // Remove win or loss screen
+    for entity in &end_screens {
+        commands.entity(entity).despawn();
+    }
+
+    // Reset score
+    score.0 = 0;
+
+    // Spawn new player, tiles, and coins
+    spawn_level(&mut commands);
+
+    // Resume game
+    next_state.set(GameState::InGame);
 }
