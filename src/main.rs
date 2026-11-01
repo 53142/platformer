@@ -1,8 +1,3 @@
-// TODO:
-// Jump Pads
-// Multiple levels
-// Level timer
-
 use bevy::prelude::*;
 
 const PLAYER_SIZE: Vec2 = vec2(26.0, 32.0 * 1.5);
@@ -10,6 +5,9 @@ const TILE_SIZE: f32 = 32.0;
 
 // Give player grace period to jump after walking off edge
 const COYOTE_TIME: f32 = 0.1;
+
+#[derive(Resource, Default)]
+struct CurrentLevel(usize);
 
 const LEVEL_1: &[&str] = &[
     ".......................................C..................",
@@ -49,22 +47,24 @@ const LEVEL_2: &[&str] = &[
     "..........................................................",
     "..........................................................",
     "..........................................................",
+    "..........................................GG..............",
     "..........................................................",
-    "..........................................................",
-    "..........................................................",
-    "..........................................................",
-    "..........................................................",
-    "..........................................................",
-    ".........................................GG...............",
-    "..........................................................",
-    ".............P............................................",
-    "............GGGGGGGGJ.....................................",
-    "..........................................................",
-    "..........................................................",
-    "..........................................................",
-    "..........................................................",
+    "........................JLL...............................",
+    ".........................LL...............................",
+    ".........................LL...............................",
+    ".........................LL...............................",
+    ".........................LL...............................",
+    ".........................LL...............................",
+    ".............P...........LL...............................",
+    "............GGGGGGGGJ....LL...............................",
+    ".........................LL...............................",
+    ".........................LL...............................",
+    ".........................LL...............................",
+    ".........................LL...............................",
     "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 ];
+
+const LEVELS: &[&[&str]] = &[LEVEL_1, LEVEL_2];
 
 #[derive(Clone, Copy, Debug)]
 pub struct TileAttributes {
@@ -253,6 +253,12 @@ struct EndScreenRoot;
 #[derive(Component)]
 struct RestartButton;
 
+#[derive(Resource, Default)]
+struct GameTimer(f32);
+
+#[derive(Component)]
+struct TimerText;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -266,6 +272,7 @@ fn main() {
         .add_systems(Startup, (setup, show_initial_message))
         .add_systems(Update, (
             hide_initial_message,
+            tick_game_timer,
             process_controls,
             move_player,
             process_environment,
@@ -291,14 +298,17 @@ fn main() {
         .add_systems(OnEnter(GameState::GameLost), show_game_lost)
         .add_systems(OnEnter(GameState::GameWon), show_game_won)
         .init_resource::<Score>()
+        .init_resource::<CurrentLevel>()
         .init_state::<GameState>()
+        .init_resource::<GameTimer>()
         .run();
 }
 
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    current_level: Res<CurrentLevel>
 ) {
     // Make camera
     commands.spawn(Camera2d);
@@ -329,8 +339,47 @@ fn setup(
         ScoreText,
     ));
 
+    // Timer text
+    commands.spawn((
+        Text::new("Time: 0.0s"),
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(12),
+            left: Val::Percent(45.0),
+            ..default()
+        },
+        TimerText,
+    ));
+
     // Create level
-    spawn_level(&mut commands, &mut meshes, &mut materials);
+    spawn_level(&mut commands, &mut meshes, &mut materials, &*current_level);
+}
+
+fn tick_game_timer(time: Res<Time>, mut timer: ResMut<GameTimer>) {
+    timer.0 += time.delta_secs();
+}
+
+// Update HUDs
+fn update_game_ui(
+    player: Query<&Health, With<Player>>,
+    score: Res<Score>,
+    timer: Res<GameTimer>,
+    mut health_text: Query<&mut Text, (With<HealthText>, Without<ScoreText>, Without<TimerText>)>,
+    mut score_text: Query<&mut Text, (With<ScoreText>, Without<HealthText>, Without<TimerText>)>,
+    mut timer_text: Query<&mut Text, (With<TimerText>, Without<HealthText>, Without<ScoreText>)>,
+) {
+    let Ok(health) = player.single() else { return; };
+
+    if let Ok(mut text) = health_text.single_mut() {
+        text.0 = format!("Health: {} / {}", health.current_health, health.max_health);
+    }
+    if let Ok(mut text) = score_text.single_mut() {
+        text.0 = format!("Score: {}", score.0);
+    }
+    if let Ok(mut text) = timer_text.single_mut() {
+        text.0 = format!("Time: {:.1}s", timer.0);
+    }
 }
 
 // Read tilemap to spawn all tiles
@@ -338,8 +387,10 @@ fn spawn_level(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
+    current_level: &CurrentLevel,
 ) {
-    for (i, row) in LEVEL_2.into_iter().rev().enumerate() {
+    let level = LEVELS.get(current_level.0).unwrap_or(&LEVEL_1);
+    for (i, row) in level.iter().rev().enumerate() {
         for (j, cell) in row.chars().enumerate() {
             match cell {
                 '.' => continue,
@@ -555,6 +606,9 @@ fn process_environment(
     mut player: Query<(&Transform, &mut Movement, &mut Health, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
     mut tiles: Query<(Entity, &Transform, Option<&mut Sprite>, Option<&MeshMaterial2d<ColorMaterial>>, &Tile), Without<Player>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
+    world_entities: Query<Entity, With<GameEntity>>,
+    mut current_level: ResMut<CurrentLevel>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let Ok((player_transform, mut movement, mut health, mut cooldown, mut damage_flash)) = player.single_mut()
     else {
@@ -589,7 +643,7 @@ fn process_environment(
             if let Some(mut sprite) = sprite_opt {
                 sprite.color = new_color;
             } else if let Some(mat_handle) = material_opt {
-                if let Some(mut material) = color_materials.get_mut(mat_handle) {
+                if let Some(mut material) = color_materials.get_mut(&mat_handle.0) {
                     material.color = new_color;
                 }
             }
@@ -605,8 +659,18 @@ fn process_environment(
         movement.speed_multiplier = movement.speed_multiplier.min(attributes.speed_multiplier);
 
         if *tile == Tile::Win {
-            next_state.set(GameState::GameWon);
-            break;
+            if current_level.0 + 1 < LEVELS.len() {
+                current_level.0 += 1;
+                // Despawn current world entities
+                for entity in &world_entities {
+                    commands.entity(entity).despawn();
+                }
+                spawn_level(&mut commands, &mut meshes, &mut color_materials, &*current_level);
+                break;
+            } else {
+                next_state.set(GameState::GameWon);
+                break;
+            }
         }
 
         if *tile == Tile::Coin {
@@ -655,29 +719,6 @@ fn update_damage_flash(time: Res<Time>, mut player: Query<(&mut Sprite, &mut Dam
     }
 }
 
-// Update HUDs
-fn update_game_ui(
-    player: Query<&Health, With<Player>>,
-    score: Res<Score>,
-    mut health_text: Query<&mut Text, (With<HealthText>, Without<ScoreText>)>,
-    mut score_text: Query<&mut Text, (With<ScoreText>, Without<HealthText>)>,
-) {
-    let Ok(health) = player.single() else {
-        return;
-    };
-
-    if let Ok(mut text) = health_text.single_mut() {
-        text.0 = format!(
-            "Health: {} / {}",
-            health.current_health,
-            health.max_health,
-        );
-    }
-
-    if let Ok(mut text) = score_text.single_mut() {
-        text.0 = format!("Score: {}", score.0);
-    }
-}
 
 // Check if player dead, if so queue death screen
 fn check_game_over(mut next_state: ResMut<NextState<GameState>>, player: Query<&Health, With<Player>>) {
@@ -793,6 +834,8 @@ fn restart_button_system(
     world_entities: Query<Entity, With<GameEntity>>,
     end_screens: Query<Entity, With<EndScreenRoot>>,
     mut score: ResMut<Score>,
+    mut timer: ResMut<GameTimer>,
+    mut current_level: ResMut<CurrentLevel>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     let mut restart_requested = false;
@@ -825,9 +868,16 @@ fn restart_button_system(
 
     // Reset score
     score.0 = 0;
+    timer.0 = 0.0;
+    current_level.0 = 0;
 
     // Spawn new level including: player, tiles, and coins
-    spawn_level(&mut commands, &mut meshes, &mut materials);
+    spawn_level(
+    &mut commands,
+    &mut meshes,
+    &mut materials,
+    &*current_level,
+);
 
     // Resume game
     next_state.set(GameState::InGame);
