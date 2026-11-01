@@ -1,3 +1,8 @@
+// TODO:
+// Jump Pads
+// Multiple levels
+// Level timer
+
 use bevy::prelude::*;
 
 const PLAYER_SIZE: Vec2 = vec2(26.0, 32.0 * 1.5);
@@ -6,7 +11,7 @@ const TILE_SIZE: f32 = 32.0;
 // Give player grace period to jump after walking off edge
 const COYOTE_TIME: f32 = 0.1;
 
-const LEVEL: &[&str] = &[
+const LEVEL_1: &[&str] = &[
     ".......................................C..................",
     "...........................C..............................",
     ".................C........................................",
@@ -40,12 +45,33 @@ const LEVEL: &[&str] = &[
     "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 ];
 
+const LEVEL_2: &[&str] = &[
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    ".........................................GG...............",
+    "..........................................................",
+    ".............P............................................",
+    "............GGGGGGGGJ.....................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "..........................................................",
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+];
+
 #[derive(Clone, Copy, Debug)]
 pub struct TileAttributes {
-    pub color: (f32, f32, f32),
+    pub color: (f32, f32, f32), // Original color of tile
     pub animate_color: Option<(f32, f32, f32)>, // Color the tile will fade to
     pub animate_speed: Option<f32>, // Speed at which tile will fade to different color; lower value is slower; higher value is faster
-    pub size: Vec2, // Overall dimensions of tile; it will prob break stuff if this is changed lol
+    pub is_circle: bool, // Whether or not the tile is circular shaped
     pub damage: u32, // The amount of damage the tile inflicts on the player when they touch it
     pub has_damage_cooldown: bool, // Whether the damage cooldown is applied to the tile
     pub speed_multiplier: f32, // How much the tile impacts user speed
@@ -60,7 +86,7 @@ impl Default for TileAttributes {
             color: (0.0, 0.0, 0.0),
             animate_color: None,
             animate_speed: None, // Higher number is faster animation
-            size: vec2(32.0, 32.0),
+            is_circle: false,
             damage: 0,
             has_damage_cooldown: true,
             speed_multiplier: 1.0,
@@ -78,6 +104,7 @@ enum Tile {
     Lava,
     Bedrock,
     Coin,
+    Bounce,
     Win, // Tile that user needs to contact to win the game
 }
 impl Tile {
@@ -115,9 +142,15 @@ impl Tile {
             },
             Tile::Coin => TileAttributes {
                 is_solid: false,
+                is_circle: true,
                 color: (1.0, 1.0, 0.0),
                 animate_color: Some((0.8, 0.8, 0.3)),
                 animate_speed: Some(6.0),
+                ..Default::default()
+            },
+            Tile::Bounce => TileAttributes {
+                color: (0.2, 1.0, 0.2),
+                bounce: 450.0,
                 ..Default::default()
             }
         }
@@ -262,7 +295,11 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>
+) {
     // Make camera
     commands.spawn(Camera2d);
 
@@ -293,21 +330,26 @@ fn setup(mut commands: Commands) {
     ));
 
     // Create level
-    spawn_level(&mut commands);
+    spawn_level(&mut commands, &mut meshes, &mut materials);
 }
 
 // Read tilemap to spawn all tiles
-fn spawn_level(commands: &mut Commands) {
-    for (i, row) in LEVEL.into_iter().rev().enumerate() {
-        for (j, column) in row.chars().enumerate() {
-            match column {
+fn spawn_level(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+) {
+    for (i, row) in LEVEL_2.into_iter().rev().enumerate() {
+        for (j, cell) in row.chars().enumerate() {
+            match cell {
                 '.' => continue,
-                'D' => spawn_block(commands, Tile::Dirt, (j, i)),
-                'G' => spawn_block(commands, Tile::Grass, (j, i)),
-                'L' => spawn_block(commands, Tile::Lava, (j, i)),
-                'B' => spawn_block(commands, Tile::Bedrock, (j, i)),
-                'W' => spawn_block(commands, Tile::Win, (j, i)),
-                'C' => spawn_block(commands, Tile::Coin, (j, i)),
+                'D' => spawn_block(commands, meshes, materials, Tile::Dirt, (j, i)),
+                'G' => spawn_block(commands, meshes, materials, Tile::Grass, (j, i)),
+                'L' => spawn_block(commands, meshes, materials, Tile::Lava, (j, i)),
+                'B' => spawn_block(commands, meshes, materials, Tile::Bedrock, (j, i)),
+                'W' => spawn_block(commands, meshes, materials, Tile::Win, (j, i)),
+                'C' => spawn_block(commands, meshes, materials, Tile::Coin, (j, i)),
+                'J' => spawn_block(commands, meshes, materials, Tile::Bounce, (j, i)),
                 'P' => {
                     // Draw player
                     commands.spawn((
@@ -336,17 +378,14 @@ fn spawn_level(commands: &mut Commands) {
 }
 
 // Helper function to create the entity for a tile
-fn spawn_block(commands: &mut Commands, tile: Tile, dims: (usize, usize)) {
-    let attributes = tile.attributes();
-
-    let sprite = Sprite::from_color(
-        Color::srgb(
-            attributes.color.0,
-            attributes.color.1,
-            attributes.color.2,
-        ),
-        attributes.size,
-    );
+fn spawn_block(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    tile: Tile,
+    dims: (usize, usize)
+) {
+    let attributes = tile.attributes();    
 
     let transform = Transform::from_xyz(
         dims.0 as f32 * TILE_SIZE,
@@ -354,21 +393,48 @@ fn spawn_block(commands: &mut Commands, tile: Tile, dims: (usize, usize)) {
         0.0,
     );
 
-    if attributes.is_solid {
+    if attributes.is_circle {
+        let mesh = meshes.add(Circle::new(TILE_SIZE / 2.0));
+        let material = materials.add(ColorMaterial::from(
+            Color::srgb(
+                attributes.color.0,
+                attributes.color.1,
+                attributes.color.2,
+            )
+        ));
+
         commands.spawn((
-            sprite,
+            Mesh2d(mesh),
+            MeshMaterial2d(material),
             transform,
-            SolidTile,
             tile,
             GameEntity,
         ));
     } else {
-        commands.spawn((
-            sprite,
-            transform,
-            tile,
-            GameEntity,
-        ));
+        let sprite = Sprite::from_color(
+            Color::srgb(
+                attributes.color.0,
+                attributes.color.1,
+                attributes.color.2,
+            ),
+            vec2(TILE_SIZE, TILE_SIZE),
+        );
+        if attributes.is_solid {
+            commands.spawn((
+                sprite,
+                transform,
+                SolidTile,
+                tile,
+                GameEntity,
+            ));
+        } else {
+            commands.spawn((
+                sprite,
+                transform,
+                tile,
+                GameEntity,
+            ));
+        }
     }
 }
 
@@ -417,13 +483,13 @@ fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement
             if !tile.attributes().is_solid {
                 continue;
             }
-            if (player_transform.translation.x - tile_transform.translation.x).abs() < ((PLAYER_SIZE.x + tile.attributes().size.x) / 2.0)
-                && (player_transform.translation.y - tile_transform.translation.y).abs() < ((PLAYER_SIZE.y + tile.attributes().size.y) / 2.0) {
+            if (player_transform.translation.x - tile_transform.translation.x).abs() < ((PLAYER_SIZE.x + TILE_SIZE) / 2.0)
+                && (player_transform.translation.y - tile_transform.translation.y).abs() < ((PLAYER_SIZE.y + TILE_SIZE) / 2.0) {
                 // Push player out of the wall horizontally
                 if movement.velocity.x > 0.0 {
-                    player_transform.translation.x = tile_transform.translation.x - (PLAYER_SIZE.x + tile.attributes().size.x) / 2.0;
+                    player_transform.translation.x = tile_transform.translation.x - (PLAYER_SIZE.x + TILE_SIZE) / 2.0;
                 } else if movement.velocity.x < 0.0 {
-                    player_transform.translation.x = tile_transform.translation.x + (PLAYER_SIZE.x + tile.attributes().size.x) / 2.0;
+                    player_transform.translation.x = tile_transform.translation.x + (PLAYER_SIZE.x + TILE_SIZE) / 2.0;
                 }
             }
         }
@@ -437,15 +503,15 @@ fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement
             if !tile.attributes().is_solid {
                 continue;
             }
-            if (player_transform.translation.x - tile_transform.translation.x).abs() < ((PLAYER_SIZE.x + tile.attributes().size.x) / 2.0)
-                && (player_transform.translation.y - tile_transform.translation.y).abs() < ((PLAYER_SIZE.y + tile.attributes().size.y) / 2.0) {
+            if (player_transform.translation.x - tile_transform.translation.x).abs() < ((PLAYER_SIZE.x + TILE_SIZE) / 2.0)
+                && (player_transform.translation.y - tile_transform.translation.y).abs() < ((PLAYER_SIZE.y + TILE_SIZE) / 2.0) {
                 if movement.velocity.y <= 0.0 {
                     // Landing on top of a tile
                     on_ground = true;
-                    player_transform.translation.y = tile_transform.translation.y + (PLAYER_SIZE.y + tile.attributes().size.y) / 2.0;
+                    player_transform.translation.y = tile_transform.translation.y + (PLAYER_SIZE.y + TILE_SIZE) / 2.0;
                 } else {
                     // Hitting head on tile
-                    player_transform.translation.y = tile_transform.translation.y - (tile.attributes().size.y + PLAYER_SIZE.y) / 2.0;
+                    player_transform.translation.y = tile_transform.translation.y - (TILE_SIZE + PLAYER_SIZE.y) / 2.0;
                 }
                 movement.velocity.y = 0.0;
             }
@@ -487,7 +553,8 @@ fn process_environment(
     time: Res<Time>,
     mut score: ResMut<Score>,
     mut player: Query<(&Transform, &mut Movement, &mut Health, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
-    mut tiles: Query<(Entity, &Transform, &mut Sprite, &Tile), Without<Player>>,
+    mut tiles: Query<(Entity, &Transform, Option<&mut Sprite>, Option<&MeshMaterial2d<ColorMaterial>>, &Tile), Without<Player>>,
+    mut color_materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let Ok((player_transform, mut movement, mut health, mut cooldown, mut damage_flash)) = player.single_mut()
     else {
@@ -506,52 +573,58 @@ fn process_environment(
 
     movement.speed_multiplier = 1.0;
 
-    for (entity, tile_transform, mut sprite, tile) in &mut tiles {
+    for (entity, tile_transform, sprite_opt, material_opt, tile) in &mut tiles {
         let attributes = tile.attributes();
-        // Animate tiles
+        // Animate tiles (handles both sprites and mesh color materials)
         if let Some(target) = attributes.animate_color {
             let base = attributes.color;
-
-            // Oscillate between 0 and 1
             let t = (time.elapsed_secs() * attributes.animate_speed.unwrap()).sin() * 0.5 + 0.5;
 
-            let r = base.0 + (target.0 - base.0) * t;
-            let g = base.1 + (target.1 - base.1) * t;
-            let b = base.2 + (target.2 - base.2) * t;
+            let new_color = Color::srgb(
+                base.0 + (target.0 - base.0) * t,
+                base.1 + (target.1 - base.1) * t,
+                base.2 + (target.2 - base.2) * t
+            );
 
-            sprite.color = Color::srgb(r, g, b);
+            if let Some(mut sprite) = sprite_opt {
+                sprite.color = new_color;
+            } else if let Some(mat_handle) = material_opt {
+                if let Some(mut material) = color_materials.get_mut(mat_handle) {
+                    material.color = new_color;
+                }
+            }
         }
 
-        let touching_tile =
-            (player_pos.x - tile_transform.translation.truncate().x).abs() < (PLAYER_SIZE.x + attributes.size.x) / 2.0
-            && (player_pos.y - tile_transform.translation.truncate().y).abs() < (PLAYER_SIZE.y + attributes.size.y) / 2.0;
+        let touching_tile = (player_pos.x - tile_transform.translation.truncate().x).abs() <= (PLAYER_SIZE.x + TILE_SIZE) / 2.0
+            && (player_pos.y - tile_transform.translation.truncate().y).abs() <= (PLAYER_SIZE.y + TILE_SIZE) / 2.0;
+
         if !touching_tile {
             continue;
         }
 
-        // Speed multiplier is the min from any tiles with multiplier
         movement.speed_multiplier = movement.speed_multiplier.min(attributes.speed_multiplier);
 
-        // Win tile
         if *tile == Tile::Win {
             next_state.set(GameState::GameWon);
             break;
         }
 
-        // Increment score and remove coin when contacted
         if *tile == Tile::Coin {
             score.0 += 1;
             commands.entity(entity).despawn();
             continue;
         }
 
-        // Only damage when touching tile that does damage and cooldown is over or tile has no cooldown
+        if attributes.bounce > 0.0 {
+            movement.velocity.y = attributes.bounce;
+            movement.number_of_jumps = 1;
+        }
+
         if attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown) {
             health.damage(attributes.damage);
             damage_flash.timer.reset();
             damage_flash.active = true;
 
-            // Only start cooldown for tiles that use one.
             if attributes.has_damage_cooldown {
                 cooldown.timer.reset();
                 cooldown.active = true;
@@ -644,7 +717,6 @@ fn hide_initial_message(
 ) {
     for (entity, mut message) in &mut messages {
         message.0.tick(time.delta());
-
         if message.0.is_finished() {
             commands.entity(entity).despawn();
         }
@@ -715,6 +787,8 @@ fn show_end_screen(commands: &mut Commands, message: &str, message_color: Color)
 // Monitor for restart button interactions and reset level when butotn pressed
 fn restart_button_system(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<'_, Assets<ColorMaterial>>,
     mut buttons: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<RestartButton>)>,
     world_entities: Query<Entity, With<GameEntity>>,
     end_screens: Query<Entity, With<EndScreenRoot>>,
@@ -730,12 +804,8 @@ fn restart_button_system(
                 *background = BackgroundColor(Color::srgb(0.1, 0.5, 0.2));
                 restart_requested = true;
             }
-            Interaction::Hovered => {
-                *background = BackgroundColor(Color::srgb(0.3, 0.3, 0.3));
-            }
-            Interaction::None => {
-                *background = BackgroundColor(Color::srgb(0.15, 0.15, 0.15));
-            }
+            Interaction::Hovered => *background = BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
+            Interaction::None => *background = BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
         }
     }
 
@@ -756,8 +826,8 @@ fn restart_button_system(
     // Reset score
     score.0 = 0;
 
-    // Spawn new player, tiles, and coins
-    spawn_level(&mut commands);
+    // Spawn new level including: player, tiles, and coins
+    spawn_level(&mut commands, &mut meshes, &mut materials);
 
     // Resume game
     next_state.set(GameState::InGame);
