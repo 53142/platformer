@@ -106,11 +106,15 @@ pub(crate) fn process_environment(
             continue;
         }
 
-        if attributes.bounce > 0.0 {
+        // Only bounce when falling
+        // Prevents bug causing bounce when clipping through tile slightly on a jump or something
+        if attributes.bounce > 0.0 && movement.velocity.y <= 0.0 {
             movement.velocity.y = attributes.bounce;
             movement.number_of_jumps = 1;
+            movement.coyote_time_remaining = 0.0;
         }
 
+        // If tile damages and player cooldown is inactive/tile doesn't have cooldown, damage player
         if attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown) {
             health.damage(attributes.damage);
             damage_flash.timer.reset();

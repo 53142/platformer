@@ -21,16 +21,18 @@ use crate::levels::{LEVEL_1, LEVELS};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TileAttributes {
-    pub color: (f32, f32, f32), // Original color of tile
-    pub animate_color: Option<(f32, f32, f32)>, // Color the tile will fade to
-    pub animate_speed: Option<f32>, // Speed at which tile will fade to different color; lower value is slower; higher value is faster
-    pub is_circle: bool, // Whether or not the tile is circular shaped
+    pub(crate) color: (f32, f32, f32), // Original color of tile
+    pub(crate) animate_color: Option<(f32, f32, f32)>, // Color the tile will fade to
+    pub(crate) animate_speed: Option<f32>, // Speed at which tile will fade to different color; lower value is slower; higher value is faster
+    pub(crate) is_circle: bool, // Whether or not the tile is circular shaped
     pub(crate) damage: u32, // The amount of damage the tile inflicts on the player when they touch it
-    pub has_damage_cooldown: bool, // Whether the damage cooldown is applied to the tile
-    pub speed_multiplier: f32, // How much the tile impacts user speed
-    pub bounce: f32, // Amount of bounce a tile has
-    pub movement_translate_pos: Option<(i32, i32)>, // If tile moves, the translation of the tile's movement
-    pub is_solid: bool, // Whether or not collisions with other entities occur
+    pub(crate) has_damage_cooldown: bool, // Whether the damage cooldown is applied to the tile
+    pub(crate) speed_multiplier: f32, // How much the tile impacts user speed
+    pub(crate) bounce: f32, // Amount of bounce a tile has
+    pub(crate) movement_translate_pos: Option<(i32, i32)>, // If tile moves, the translation of the tile's movement
+    pub(crate) movement_distance: f32, // Will implement later; will allow for manually adjusting tile's movement attributes
+    pub(crate) movement_speed: f32, // Will implement later; will allow for manually adjusting tile's movement attributes
+    pub(crate) is_solid: bool, // Whether or not collisions with other entities occur
 }
 
 // Make it so you don't have to type every single attribute all the time
@@ -46,6 +48,8 @@ impl Default for TileAttributes {
             speed_multiplier: 1.0,
             bounce: 0.0,
             movement_translate_pos: None, // No tile movement by default
+            movement_distance: 0.0,
+            movement_speed: 0.0,
             is_solid: true,
         }
     }
@@ -112,6 +116,8 @@ impl Tile {
             Tile::Moving => TileAttributes {
                 color:  (0.1, 0.1, 0.1),
                 movement_translate_pos: Some((1, 0)),
+                movement_distance: TILE_SIZE * 4.0,
+                movement_speed: 2.0,
                 ..Default::default()
             }
         }
