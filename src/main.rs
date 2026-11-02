@@ -3,6 +3,9 @@ use bevy::prelude::*;
 const PLAYER_SIZE: Vec2 = vec2(26.0, 32.0 * 1.5);
 const TILE_SIZE: f32 = 32.0;
 
+const MOVING_TILE_DISTANCE: f32 = TILE_SIZE * 3.0;
+const MOVING_TILE_SPEED: f32 = 1.5;
+
 // Give player grace period to jump after walking off edge
 const COYOTE_TIME: f32 = 0.1;
 
@@ -44,27 +47,45 @@ const LEVEL_1: &[&str] = &[
 ];
 
 const LEVEL_2: &[&str] = &[
-    "..........................................................",
-    "..........................................................",
-    "..........................................................",
-    "..........................................GG..............",
-    "..........................................................",
-    "........................JLL...............................",
+    "...................................C......................",
+    "................................DDDDDDDDDDDDDD.........LL.",
+    "C..............C.......................................DL.",
+    "..........................C............................DL.",
+    ".......J..........J...................J....GG..........DLW",
+    ".......................................................DLLD",
+    "........................JLL....................J.......DDDD",
     ".........................LL...............................",
     ".........................LL...............................",
+    "..............C..........LL...............................",
+    ".........................LL................J..............",
     ".........................LL...............................",
-    ".........................LL...............................",
-    ".........................LL...............................",
-    ".............P...........LL...............................",
-    "............GGGGGGGGJ....LL...............................",
-    ".........................LL...............................",
-    ".........................LL...............................",
-    ".........................LL...............................",
-    ".........................LL...............................",
+    ".C.......................LL...............................",
+    ".D..........GGGGGGGGJ....LL...........................C...",
+    ".........................LL.......C...................JLLL",
+    ".........................LL.............J.............GGGL",
+    "........J................LL..............................L",
+    ".........................LL..............................L",
+    ".........................LL..............................L",
+    ".........................LL..............................L",
+    "......J..................LL..............................L",
+    "......M..................LL..............................L",
+    ".........................LL..............................L",
+    ".........................LL..............................L",
+    ".........................LL..............................L",
+    "............M............LL..............................L",
+    ".........................LL..............................L",
+    ".........................LL..............................L",
+    ".........................LL..............................L",
+    ".....M...................LL..............................L",
+    ".........................LL..............................L",
+    "..............P..........LL..............................L",
+    "..............D..........LL..............................L",
+    ".........................LL..............................L",
     "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 ];
 
-const LEVELS: &[&[&str]] = &[LEVEL_1, LEVEL_2];
+// TEMPORARY REMEMBER TO CHANGE LATER
+const LEVELS: &[&[&str]] = &[LEVEL_2, LEVEL_1];
 
 #[derive(Clone, Copy, Debug)]
 pub struct TileAttributes {
@@ -75,7 +96,8 @@ pub struct TileAttributes {
     pub damage: u32, // The amount of damage the tile inflicts on the player when they touch it
     pub has_damage_cooldown: bool, // Whether the damage cooldown is applied to the tile
     pub speed_multiplier: f32, // How much the tile impacts user speed
-    pub bounce: f32, // Amount of bounce a tile has; Not implemented yet
+    pub bounce: f32, // Amount of bounce a tile has
+    pub movement_translate_pos: Option<(i32, i32)>, // If tile moves, the translation of the tile's movement
     pub is_solid: bool, // Whether or not collisions with other entities occur
 }
 
@@ -91,6 +113,7 @@ impl Default for TileAttributes {
             has_damage_cooldown: true,
             speed_multiplier: 1.0,
             bounce: 0.0,
+            movement_translate_pos: None, // No tile movement by default
             is_solid: true,
         }
     }
@@ -105,6 +128,7 @@ enum Tile {
     Bedrock,
     Coin,
     Bounce,
+    Moving,
     Win, // Tile that user needs to contact to win the game
 }
 impl Tile {
@@ -151,6 +175,11 @@ impl Tile {
             Tile::Bounce => TileAttributes {
                 color: (0.2, 1.0, 0.2),
                 bounce: 450.0,
+                ..Default::default()
+            },
+            Tile::Moving => TileAttributes {
+                color:  (0.1, 0.1, 0.1),
+                movement_translate_pos: Some((1, 0)),
                 ..Default::default()
             }
         }
@@ -214,6 +243,13 @@ struct InitialMessage(Timer);
 #[derive(Component)]
 struct SolidTile;
 
+// Stores moving tile start point and movement speed
+#[derive(Component)]
+struct MovingTileMotion {
+    origin: Vec3,
+    direction: Vec2,
+}
+
 #[derive(Component)]
 struct DamageCooldown {
     timer: Timer,
@@ -274,6 +310,7 @@ fn main() {
             hide_initial_message,
             tick_game_timer,
             process_controls,
+            move_tiles,
             move_player,
             process_environment,
             check_game_over,
@@ -294,7 +331,6 @@ fn main() {
                 .after(update_game_ui)
                 .after(check_game_over),
         )
-
         .add_systems(OnEnter(GameState::GameLost), show_game_lost)
         .add_systems(OnEnter(GameState::GameWon), show_game_won)
         .init_resource::<Score>()
@@ -304,12 +340,7 @@ fn main() {
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    current_level: Res<CurrentLevel>
-) {
+fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>, current_level: Res<CurrentLevel>) {
     // Make camera
     commands.spawn(Camera2d);
 
@@ -401,6 +432,7 @@ fn spawn_level(
                 'W' => spawn_block(commands, meshes, materials, Tile::Win, (j, i)),
                 'C' => spawn_block(commands, meshes, materials, Tile::Coin, (j, i)),
                 'J' => spawn_block(commands, meshes, materials, Tile::Bounce, (j, i)),
+                'M' => spawn_block(commands, meshes, materials, Tile::Moving, (j, i)),
                 'P' => {
                     // Draw player
                     commands.spawn((
@@ -444,6 +476,7 @@ fn spawn_block(
         0.0,
     );
 
+    // Coins need different stuff apparently
     if attributes.is_circle {
         let mesh = meshes.add(Circle::new(TILE_SIZE / 2.0));
         let material = materials.add(ColorMaterial::from(
@@ -471,13 +504,30 @@ fn spawn_block(
             vec2(TILE_SIZE, TILE_SIZE),
         );
         if attributes.is_solid {
-            commands.spawn((
-                sprite,
-                transform,
-                SolidTile,
-                tile,
-                GameEntity,
-            ));
+            // If moving tile
+            if let Some((dx, dy)) = attributes.movement_translate_pos {
+                let motion = MovingTileMotion {
+                    origin: transform.translation,
+                    direction: Vec2::new(dx as f32, dy as f32).normalize_or_zero(),
+                };
+
+                commands.spawn((
+                    sprite,
+                    transform,
+                    SolidTile,
+                    tile,
+                    GameEntity,
+                    motion,
+                ));
+            } else { // Tile doesn't move
+                commands.spawn((
+                    sprite,
+                    transform,
+                    SolidTile,
+                    tile,
+                    GameEntity,
+                ));
+            }
         } else {
             commands.spawn((
                 sprite,
@@ -594,6 +644,23 @@ fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement
         // Move camera
         camera_transform.translation.x += (player_transform.translation.x - camera_transform.translation.x) * smoothing;
         camera_transform.translation.y += (player_transform.translation.y - camera_transform.translation.y) * smoothing;
+    }
+}
+
+fn move_tiles(
+    time: Res<Time>,
+    mut tiles: Query<(&mut Transform, &MovingTileMotion)>,
+) {
+    let phase = time.elapsed_secs() * MOVING_TILE_SPEED;
+    let offset = phase.sin() * MOVING_TILE_DISTANCE;
+
+    for (mut transform, motion) in &mut tiles {
+        transform.translation = motion.origin
+            + Vec3::new(
+                motion.direction.x * offset,
+                motion.direction.y * offset,
+                0.0,
+            );
     }
 }
 
@@ -869,15 +936,11 @@ fn restart_button_system(
     // Reset score
     score.0 = 0;
     timer.0 = 0.0;
-    current_level.0 = 0;
+    // Prob shouldn't reset to first level?
+    // current_level.0 = 0;
 
     // Spawn new level including: player, tiles, and coins
-    spawn_level(
-    &mut commands,
-    &mut meshes,
-    &mut materials,
-    &*current_level,
-);
+    spawn_level(&mut commands, &mut meshes, &mut materials, &current_level);
 
     // Resume game
     next_state.set(GameState::InGame);

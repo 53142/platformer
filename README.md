@@ -4,6 +4,8 @@ A simple platformer game made in Rust with the Bevy game engine.
 The point of the game is to reach the "Win" tile, while collecting as many coins along the way to increase your score as you can.
 There are many gaps and a lot of lava so there are many opportunities for the user to die. The player has 2 health so users may be able to survive accidentally falling into lava if they can exit quick enough.
 
+The game features 2 different levels. After winning the first level, the second level automatically loads. Winning that brings the player to a win screen.
+
 ## Controls
 Use the 'a' or the left arrow key to move left and 'd' or the right arrow key to move right. You can jump up to two times before touching the ground by pressing 'space' or the up arrow key.
 
@@ -19,8 +21,11 @@ Win - A special animated tile that cycles between Green, White, and Magenta. Con
 The player's health is displayed in the top-left of the screen and the score (number of coins collected) is displayed in the top-right.
 
 ## Pictures
-Full level screenshot
-![Full Level Picture](image-1.png)
+1st level screenshot
+![1st Level Picture](image-1.png)
+
+Part of 2nd level screenshot
+![Part of 2nd Level Visible](image-3.png)
 
 Win Screen
 ![Win Screen](image-2.png)
