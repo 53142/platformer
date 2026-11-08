@@ -5,7 +5,7 @@ use crate::components::{
     DamageCooldown,
     DamageFlash,
     GameEntity,
-    Health,
+    Lives,
     PlayerMovement,
     Player,
 };
@@ -66,6 +66,7 @@ pub(crate)enum Tile {
     Bounce,
     Moving,
     Checkpoint,
+    Enemy,
     Win, // Tile that user needs to contact to win the game
 }
 impl Tile {
@@ -128,6 +129,11 @@ impl Tile {
               is_solid: false,
               is_circle: true,
               ..Default::default()
+            },
+            Tile::Enemy => TileAttributes {
+                color: (0.0, 0.0, 1.0),
+                is_solid: false,
+                ..Default::default()
             }
         }
     }
@@ -138,6 +144,9 @@ struct SolidTile;
 
 #[derive(Component)]
 struct Checkpoint;
+
+#[derive(Component)]
+struct Enemy;
 
 // Stores moving tile start point and movement speed
 #[derive(Component)]
@@ -159,15 +168,16 @@ pub(crate) fn spawn_level(
         for (j, cell) in row.chars().enumerate() {
             match cell {
                 '.' => continue,
-                'D' => spawn_block(commands, meshes, materials, Tile::Dirt, (j, i)),
-                'G' => spawn_block(commands, meshes, materials, Tile::Grass, (j, i)),
-                'L' => spawn_block(commands, meshes, materials, Tile::Lava, (j, i)),
-                'B' => spawn_block(commands, meshes, materials, Tile::Bedrock, (j, i)),
-                'W' => spawn_block(commands, meshes, materials, Tile::Win, (j, i)),
-                'C' => spawn_block(commands, meshes, materials, Tile::Coin, (j, i)), // TODO: DO CHECKPOINTS RESPAWN PLAYER AT THEIR COORDS EVEN AFTER LEVEL CHANGE?
-                'J' => spawn_block(commands, meshes, materials, Tile::Bounce, (j, i)),
-                'M' => spawn_block(commands, meshes, materials, Tile::Moving, (j, i)),
-                'N' => spawn_block(commands, meshes, materials, Tile::Checkpoint, (j, i)),
+                'D' => spawn_tile(commands, meshes, materials, Tile::Dirt, (j, i)),
+                'G' => spawn_tile(commands, meshes, materials, Tile::Grass, (j, i)),
+                'L' => spawn_tile(commands, meshes, materials, Tile::Lava, (j, i)),
+                'B' => spawn_tile(commands, meshes, materials, Tile::Bedrock, (j, i)),
+                'W' => spawn_tile(commands, meshes, materials, Tile::Win, (j, i)),
+                'C' => spawn_tile(commands, meshes, materials, Tile::Coin, (j, i)), // TODO: DO CHECKPOINTS RESPAWN PLAYER AT THEIR COORDS EVEN AFTER LEVEL CHANGE?
+                'J' => spawn_tile(commands, meshes, materials, Tile::Bounce, (j, i)),
+                'M' => spawn_tile(commands, meshes, materials, Tile::Moving, (j, i)),
+                'N' => spawn_tile(commands, meshes, materials, Tile::Checkpoint, (j, i)),
+                'E' => spawn_tile(commands, meshes, materials, Tile::Enemy, (j, i)),
                 'P' => {
                     let spawn_location = (j as f32 * TILE_SIZE, i as f32 * TILE_SIZE, 1.0);
                     // Draw player
@@ -187,7 +197,7 @@ pub(crate) fn spawn_level(
                             // Default respawn location to default world spawn
                             respawn_location: vec2(spawn_location.0, spawn_location.1),
                         },
-                        Health::new(4),
+                        Lives::new(100),
                         DamageCooldown::new(1.0),
                         DamageFlash::new(0.15),
                     ));
@@ -199,7 +209,7 @@ pub(crate) fn spawn_level(
 }
 
 // Helper function to create the entity for a tile
-pub(crate)fn spawn_block(
+pub(crate)fn spawn_tile(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<ColorMaterial>>,
@@ -214,7 +224,7 @@ pub(crate)fn spawn_block(
         0.0,
     );
 
-    // It's harder to do different shapes I guess
+    // It's harder to do different shapes apparently
     if attributes.is_circle {
         let mesh = meshes.add(Circle::new(TILE_SIZE / 2.0));
         let material = materials.add(ColorMaterial::from(
@@ -260,12 +270,20 @@ pub(crate)fn spawn_block(
                     GameEntity,
                 ));
             }
-        } else {
+        } else { // tile not solid
             if tile == Tile::Checkpoint {
                 commands.spawn((
                     sprite,
                     transform,
                     Checkpoint,
+                    tile,
+                    GameEntity,
+                ));
+            } else if tile == Tile::Enemy {
+                commands.spawn((
+                    sprite,
+                    transform,
+                    Enemy,
                     tile,
                     GameEntity,
                 ));

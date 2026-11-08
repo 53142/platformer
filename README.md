@@ -25,10 +25,10 @@ Go to the releases tab in Github and find the latest release. There is a windows
 
 ## Pictures
 1st level screenshot
-![1st Level Picture](image-1.png)
+![1st Level Picture](image-4.png)
 
 Part of 2nd level screenshot
-![Part of 2nd Level Visible](image-3.png)
+![Part of 2nd Level Picture](image-5.png)
 
 Win Screen
 ![Win Screen](image-2.png)

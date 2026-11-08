@@ -6,7 +6,7 @@ use crate::components::{
     DamageFlash,
     GameEntity,
     GameState,
-    Health,
+    Lives,
     PlayerMovement,
     Player,
     Score,
@@ -27,7 +27,7 @@ pub(crate) fn process_environment(
     mut next_state: ResMut<NextState<GameState>>,
     time: Res<Time>,
     mut score: ResMut<Score>,
-    mut player: Query<(&mut Transform, &mut PlayerMovement, &mut Health, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
+    mut player: Query<(&mut Transform, &mut PlayerMovement, &mut Lives, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
     mut tiles: Query<(Entity, &Transform, Option<&mut Sprite>, Option<&MeshMaterial2d<ColorMaterial>>, &Tile), Without<Player>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     world_entities: Query<Entity, With<GameEntity>>,
@@ -97,36 +97,44 @@ pub(crate) fn process_environment(
           }
           Tile::Checkpoint => {
             // TODO: Eventually have a way to not reset spawn location if user touches old spawn point (user somehow fell or something and contacted old spawn location)
-            movement.respawn_location = tile_transform.translation.truncate();
+            movement.respawn_location.x = tile_transform.translation.x;
+            movement.respawn_location.y = tile_transform.translation.y + PLAYER_SIZE.y / 2.0;
             commands.entity(entity).despawn();
             continue;
+          }
+          Tile::Enemy => {
+            health.remove_lives(1)
           }
           _ => {}
         }
 
         // If tile damages and player cooldown is inactive/tile doesn't have cooldown, damage player
         // Or if player falls too far damage them
-        if attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown)  {
+        if (attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown)) || player_transform.translation.y < 200.0 {
           damage_player(&mut health, attributes, &mut damage_flash, &mut player_transform, &mut movement, &mut cooldown);
         }
     }
 }
 
 fn damage_player(
-    health: &mut Health,
+    health: &mut Lives,
     attributes: TileAttributes,
     damage_flash: &mut DamageFlash,
     player_transform: &mut Transform,
     movement: &mut PlayerMovement,
     cooldown: &mut DamageCooldown,
 ) {
-      health.damage(attributes.damage);
+      health.remove_lives(attributes.damage);
       damage_flash.timer.reset();
       damage_flash.active = true;
 
       // Move player to last check point position
       player_transform.translation.x = movement.respawn_location.x;
       player_transform.translation.y = movement.respawn_location.y;
+
+      // Reset player movement
+      movement.velocity.x = 0.0;
+      movement.velocity.y = 0.0;
 
       if attributes.has_damage_cooldown {
           cooldown.timer.reset();

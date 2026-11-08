@@ -8,7 +8,7 @@ use crate::components::{
     GameEntity,
     GameState,
     GameTimer,
-    Health,
+    Lives,
     HealthText,
     InitialMessage,
     Player,
@@ -23,7 +23,7 @@ use crate::tiles::spawn_level;
 
 // Update HUDs
 pub(crate) fn update_game_ui(
-    player: Query<&Health, With<Player>>,
+    player: Query<&Lives, With<Player>>,
     score: Res<Score>,
     timer: Res<GameTimer>,
     level: Res<CurrentLevel>,
@@ -35,7 +35,7 @@ pub(crate) fn update_game_ui(
     let Ok(health) = player.single() else { return; };
 
     if let Ok(mut text) = health_text.single_mut() {
-        text.0 = format!("Health: {} / {}", health.current_health, health.max_health);
+        text.0 = format!("Health: {} / {}", health.current_lives, health.max_lives);
     }
     if let Ok(mut text) = score_text.single_mut() {
         text.0 = format!("Score: {}", score.0);

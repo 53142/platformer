@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::components::{
     CurrentLevel,
     GameEntity,
-    Health,
+    Lives,
     PlayerMovement,
     Player,
     GameState,
@@ -148,7 +148,6 @@ pub(crate) fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &m
         let y_step = delta_y / y_steps as f32;
 
         let mut on_ground = false;
-        let mut bounced = false;
 
         for _ in 0..y_steps {
             if movement.velocity.y == 0.0 {
@@ -173,7 +172,6 @@ pub(crate) fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &m
                 let tile_top = tile_transform.translation.y + TILE_SIZE / 2.0;
                 let tile_bottom = tile_transform.translation.y - TILE_SIZE / 2.0;
 
-
                 // Landing on top of a tile
                 if y_step < 0.0 && (prev_y - PLAYER_SIZE.y / 2.0) >= tile_top && (next_y - PLAYER_SIZE.y / 2.0) <= tile_top {
                     player_transform.translation.y = tile_top + PLAYER_SIZE.y / 2.0;
@@ -183,8 +181,6 @@ pub(crate) fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &m
                         movement.velocity.y = tile.attributes().bounce;
                         movement.number_of_jumps = 1;
                         movement.coyote_time_remaining = 0.0;
-
-                        bounced = true;
                     } else {
                         // Normal landing
                         movement.velocity.y = 0.0;
@@ -244,12 +240,12 @@ pub(crate) fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &m
 }
 
 // Check if player dead, if so queue death screen
-pub(crate) fn check_game_over(mut next_state: ResMut<NextState<GameState>>, player: Query<&Health, With<Player>>) {
+pub(crate) fn check_game_over(mut next_state: ResMut<NextState<GameState>>, player: Query<&Lives, With<Player>>) {
     let Ok(health) = player.single() else {
         return;
     };
 
-    if health.player_dead() {
+    if health.game_over() {
         next_state.set(GameState::GameLost)
     }
 }

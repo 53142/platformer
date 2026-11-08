@@ -24,25 +24,25 @@ pub(crate) struct PlayerMovement {
 }
 
 #[derive(Component)]
-pub(crate) struct Health {
-    pub(crate) max_health: u32,
-    pub(crate) current_health: u32,
+pub(crate) struct Lives {
+    pub(crate) max_lives: u32,
+    pub(crate) current_lives: u32,
 }
 
-impl Health {
-    pub(crate) fn new(max_health: u32) -> Self {
+impl Lives {
+    pub(crate) fn new(max_lives: u32) -> Self {
         Self {
-            max_health: max_health,
-            current_health: max_health,
+            max_lives,
+            current_lives: max_lives,
         }
     }
 
-    pub(crate) fn damage(&mut self, amount: u32) {
-        self.current_health = self.current_health.saturating_sub(amount);
+    pub(crate) fn remove_lives(&mut self, amount: u32) {
+        self.current_lives = self.current_lives.saturating_sub(amount);
     }
 
-    pub(crate) fn player_dead(&self) -> bool {
-        self.current_health == 0
+    pub(crate) fn game_over(&self) -> bool {
+        self.current_lives == 0
     }
 }
 
