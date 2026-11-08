@@ -164,7 +164,7 @@ pub(crate) fn spawn_level(
                 'L' => spawn_block(commands, meshes, materials, Tile::Lava, (j, i)),
                 'B' => spawn_block(commands, meshes, materials, Tile::Bedrock, (j, i)),
                 'W' => spawn_block(commands, meshes, materials, Tile::Win, (j, i)),
-                'C' => spawn_block(commands, meshes, materials, Tile::Coin, (j, i)),
+                'C' => spawn_block(commands, meshes, materials, Tile::Coin, (j, i)), // TODO: DO CHECKPOINTS RESPAWN PLAYER AT THEIR COORDS EVEN AFTER LEVEL CHANGE?
                 'J' => spawn_block(commands, meshes, materials, Tile::Bounce, (j, i)),
                 'M' => spawn_block(commands, meshes, materials, Tile::Moving, (j, i)),
                 'N' => spawn_block(commands, meshes, materials, Tile::Checkpoint, (j, i)),

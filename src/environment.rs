@@ -19,10 +19,7 @@ use crate::constants::{
 
 use crate::levels::LEVELS;
 
-use crate::tiles::{
-    spawn_level,
-    Tile,
-};
+use crate::tiles::{ Tile, TileAttributes, spawn_level };
 
 // Process tiles and other environment stuff
 pub(crate) fn process_environment(
@@ -58,9 +55,9 @@ pub(crate) fn process_environment(
         let attributes = tile.attributes();
 
         // Animate tiles (handles both sprites and mesh color materials)
-        if let Some(target) = attributes.animate_color {
+        if let (Some(target), Some(speed)) = (attributes.animate_color, attributes.animate_speed) {
             let base = attributes.color;
-            let t = (time.elapsed_secs() * attributes.animate_speed.unwrap()).sin() * 0.5 + 0.5;
+            let t = (time.elapsed_secs() * speed).sin() * 0.5 + 0.5;
 
             let new_color = Color::srgb(
                 base.0 + (target.0 - base.0) * t,
@@ -90,7 +87,7 @@ pub(crate) fn process_environment(
         // Actions to do for each tile the player touches
         match *tile {
           Tile::Win => {
-            increment_level(commands, current_level, world_entities, meshes, color_materials, next_state);
+            increment_level(&mut commands, &mut current_level, &world_entities, &mut meshes, &mut color_materials, &mut next_state);
             break; // Don't need to process anything else if won
           }
           Tile::Coin => {
@@ -107,45 +104,49 @@ pub(crate) fn process_environment(
           _ => {}
         }
 
-        // Only bounce when falling
-        // Prevents bug causing bounce when clipping through tile slightly on a jump or something
-        if attributes.bounce > 0.0 && movement.velocity.y <= 0.0 {
-            movement.velocity.y = attributes.bounce;
-            movement.number_of_jumps = 1;
-            movement.coyote_time_remaining = 0.0;
-        }
-
         // If tile damages and player cooldown is inactive/tile doesn't have cooldown, damage player
-        if attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown) {
-            health.damage(attributes.damage);
-            damage_flash.timer.reset();
-            damage_flash.active = true;
-
-            // Move player to last check point position
-            player_transform.translation.x = movement.respawn_location.x;
-            player_transform.translation.y = movement.respawn_location.y;
-
-            if attributes.has_damage_cooldown {
-                cooldown.timer.reset();
-                cooldown.active = true;
-            }
+        // Or if player falls too far damage them
+        if attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown)  {
+          damage_player(&mut health, attributes, &mut damage_flash, &mut player_transform, &mut movement, &mut cooldown);
         }
     }
 }
 
+fn damage_player(
+    health: &mut Health,
+    attributes: TileAttributes,
+    damage_flash: &mut DamageFlash,
+    player_transform: &mut Transform,
+    movement: &mut PlayerMovement,
+    cooldown: &mut DamageCooldown,
+) {
+      health.damage(attributes.damage);
+      damage_flash.timer.reset();
+      damage_flash.active = true;
+
+      // Move player to last check point position
+      player_transform.translation.x = movement.respawn_location.x;
+      player_transform.translation.y = movement.respawn_location.y;
+
+      if attributes.has_damage_cooldown {
+          cooldown.timer.reset();
+          cooldown.active = true;
+      }
+    }
+
 pub(crate) fn increment_level(
-    mut commands: Commands,
-    mut current_level: ResMut<CurrentLevel>,
-    world_entities: Query<Entity, With<GameEntity>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut color_materials: ResMut<Assets<ColorMaterial>>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut commands: &mut Commands,
+    current_level: &mut ResMut<CurrentLevel>,
+    world_entities: &Query<Entity, With<GameEntity>>,
+    mut meshes: &mut ResMut<Assets<Mesh>>,
+    mut color_materials: &mut ResMut<Assets<ColorMaterial>>,
+    next_state: &mut ResMut<NextState<GameState>>,
 ) {
     if current_level.0 + 1 < LEVELS.len() {
         current_level.0 += 1;
 
         // Despawn current world entities
-        for entity in &world_entities {
+        for entity in world_entities {
             commands.entity(entity).despawn();
         }
 
