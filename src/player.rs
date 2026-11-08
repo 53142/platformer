@@ -1,8 +1,10 @@
 use bevy::prelude::*;
 
 use crate::components::{
+    CurrentLevel,
+    GameEntity,
     Health,
-    Movement,
+    PlayerMovement,
     Player,
     GameState,
 };
@@ -13,13 +15,23 @@ use crate::constants::{
     TILE_SIZE,
 };
 
+use crate::environment::increment_level;
 use crate::tiles::{
     MovingTileMotion,
     Tile,
 };
 
 // User controls
-pub(crate) fn process_controls(keyboard: Res<ButtonInput<KeyCode>>, mut player: Query<&mut Movement, With<Player>>) {
+pub(crate) fn process_controls(
+    commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut player: Query<&mut PlayerMovement, With<Player>>,
+    current_level: ResMut<CurrentLevel>,
+    world_entities: Query<Entity, With<GameEntity>>,
+    meshes: ResMut<Assets<Mesh>>,
+    color_materials: ResMut<Assets<ColorMaterial>>,
+    next_state: ResMut<NextState<GameState>>,
+) {
     let Ok(mut movement) = player.single_mut() else {
         return;
     };
@@ -37,9 +49,8 @@ pub(crate) fn process_controls(keyboard: Res<ButtonInput<KeyCode>>, mut player: 
 
     movement.velocity.x = direction * 100.0;
 
-    // Can only jumps twice in air
-    let jump_pressed = keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::ArrowUp);
-    if jump_pressed {
+    // Can only jump twice in air
+    if keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::ArrowUp) {
         if movement.number_of_jumps == 0 && movement.coyote_time_remaining > 0.0 {
             movement.velocity.y = 300.0;
             movement.number_of_jumps = 1;
@@ -49,10 +60,22 @@ pub(crate) fn process_controls(keyboard: Res<ButtonInput<KeyCode>>, mut player: 
             movement.number_of_jumps = 2;
         }
     }
+
+    // Skip level
+    if keyboard.just_pressed(KeyCode::Semicolon) {
+        increment_level(
+            commands,
+            current_level,
+            world_entities,
+            meshes,
+            color_materials,
+            next_state,
+        );
+    }
 }
 
 // Player and camera movement
-pub(crate) fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut Movement), With<Player>>, tiles: Query<(&Transform, &Tile, Option<&MovingTileMotion>), Without<Player>>, mut camera: Query<&mut Transform, (With<Camera>, Without<Player>, Without<Tile>)>,) {
+pub(crate) fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &mut PlayerMovement), With<Player>>, tiles: Query<(&Transform, &Tile, Option<&MovingTileMotion>), Without<Player>>, mut camera: Query<&mut Transform, (With<Camera>, Without<Player>, Without<Tile>)>,) {
     for (mut player_transform, mut movement) in &mut player {
         let dt = time.delta_secs();
 

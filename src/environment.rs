@@ -7,7 +7,7 @@ use crate::components::{
     GameEntity,
     GameState,
     Health,
-    Movement,
+    PlayerMovement,
     Player,
     Score,
 };
@@ -30,14 +30,14 @@ pub(crate) fn process_environment(
     mut next_state: ResMut<NextState<GameState>>,
     time: Res<Time>,
     mut score: ResMut<Score>,
-    mut player: Query<(&Transform, &mut Movement, &mut Health, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
+    mut player: Query<(&mut Transform, &mut PlayerMovement, &mut Health, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
     mut tiles: Query<(Entity, &Transform, Option<&mut Sprite>, Option<&MeshMaterial2d<ColorMaterial>>, &Tile), Without<Player>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     world_entities: Query<Entity, With<GameEntity>>,
     mut current_level: ResMut<CurrentLevel>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let Ok((player_transform, mut movement, mut health, mut cooldown, mut damage_flash)) = player.single_mut()
+    let Ok((mut player_transform, mut movement, mut health, mut cooldown, mut damage_flash)) = player.single_mut()
     else {
         return;
     };
@@ -56,6 +56,7 @@ pub(crate) fn process_environment(
 
     for (entity, tile_transform, sprite_opt, material_opt, tile) in &mut tiles {
         let attributes = tile.attributes();
+
         // Animate tiles (handles both sprites and mesh color materials)
         if let Some(target) = attributes.animate_color {
             let base = attributes.color;
@@ -83,27 +84,27 @@ pub(crate) fn process_environment(
             continue;
         }
 
+        // Take minimum speed multiplier between player and thew touching tile
         movement.speed_multiplier = movement.speed_multiplier.min(attributes.speed_multiplier);
 
-        if *tile == Tile::Win {
-            if current_level.0 + 1 < LEVELS.len() {
-                current_level.0 += 1;
-                // Despawn current world entities
-                for entity in &world_entities {
-                    commands.entity(entity).despawn();
-                }
-                spawn_level(&mut commands, &mut meshes, &mut color_materials, &*current_level);
-                break;
-            } else {
-                next_state.set(GameState::GameWon);
-                break;
-            }
-        }
-
-        if *tile == Tile::Coin {
+        // Actions to do for each tile the player touches
+        match *tile {
+          Tile::Win => {
+            increment_level(commands, current_level, world_entities, meshes, color_materials, next_state);
+            break; // Don't need to process anything else if won
+          }
+          Tile::Coin => {
             score.0 += 1;
             commands.entity(entity).despawn();
             continue;
+          }
+          Tile::Checkpoint => {
+            // TODO: Eventually have a way to not reset spawn location if user touches old spawn point (user somehow fell or something and contacted old spawn location)
+            movement.respawn_location = tile_transform.translation.truncate();
+            commands.entity(entity).despawn();
+            continue;
+          }
+          _ => {}
         }
 
         // Only bounce when falling
@@ -120,10 +121,41 @@ pub(crate) fn process_environment(
             damage_flash.timer.reset();
             damage_flash.active = true;
 
+            // Move player to last check point position
+            player_transform.translation.x = movement.respawn_location.x;
+            player_transform.translation.y = movement.respawn_location.y;
+
             if attributes.has_damage_cooldown {
                 cooldown.timer.reset();
                 cooldown.active = true;
             }
         }
+    }
+}
+
+pub(crate) fn increment_level(
+    mut commands: Commands,
+    mut current_level: ResMut<CurrentLevel>,
+    world_entities: Query<Entity, With<GameEntity>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut color_materials: ResMut<Assets<ColorMaterial>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if current_level.0 + 1 < LEVELS.len() {
+        current_level.0 += 1;
+
+        // Despawn current world entities
+        for entity in &world_entities {
+            commands.entity(entity).despawn();
+        }
+
+        spawn_level(
+            &mut commands,
+            &mut meshes,
+            &mut color_materials,
+            &*current_level,
+        );
+    } else {
+        next_state.set(GameState::GameWon);
     }
 }

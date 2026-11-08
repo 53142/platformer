@@ -20,6 +20,9 @@ Win - A special animated tile that cycles between Green, White, and Magenta. Con
 
 The player's health is displayed in the top-left of the screen and the score (number of coins collected) is displayed in the top-right.
 
+## Running
+Go to the releases tab in Github and find the latest release. There is a windows binary (exe file) for windows machines. Unfortunately, if you are using a different operating system like linux, you will have to git clone this repo and use cargo to compile the code yourself.
+
 ## Pictures
 1st level screenshot
 ![1st Level Picture](image-1.png)

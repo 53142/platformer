@@ -15,11 +15,12 @@ pub(crate) enum GameState {
 pub(crate) struct Player;
 
 #[derive(Component)]
-pub(crate) struct Movement {
+pub(crate) struct PlayerMovement {
     pub(crate) velocity: Vec2, // Velocity without speed multiplied
     pub(crate) speed_multiplier: f32,
     pub(crate) number_of_jumps: u8,
     pub(crate) coyote_time_remaining: f32,
+    pub(crate) respawn_location: Vec2,
 }
 
 #[derive(Component)]
@@ -101,3 +102,6 @@ pub(crate) struct GameTimer(pub(crate) f32);
 
 #[derive(Component)]
 pub(crate) struct TimerText;
+
+#[derive(Component)]
+pub(crate) struct LevelText;

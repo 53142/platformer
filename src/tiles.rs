@@ -6,7 +6,7 @@ use crate::components::{
     DamageFlash,
     GameEntity,
     Health,
-    Movement,
+    PlayerMovement,
     Player,
 };
 
@@ -65,6 +65,7 @@ pub(crate)enum Tile {
     Coin,
     Bounce,
     Moving,
+    Checkpoint,
     Win, // Tile that user needs to contact to win the game
 }
 impl Tile {
@@ -119,6 +120,14 @@ impl Tile {
                 movement_distance: TILE_SIZE * 4.0,
                 movement_speed: 2.0,
                 ..Default::default()
+            },
+            Tile::Checkpoint => TileAttributes {
+              color: (0.0, 0.0, 0.0),
+              animate_color: Some((1.0, 1.0, 1.0)),
+              animate_speed: Some(2.0),
+              is_solid: false,
+              is_circle: true,
+              ..Default::default()
             }
         }
     }
@@ -126,6 +135,9 @@ impl Tile {
 
 #[derive(Component)]
 struct SolidTile;
+
+#[derive(Component)]
+struct Checkpoint;
 
 // Stores moving tile start point and movement speed
 #[derive(Component)]
@@ -155,28 +167,32 @@ pub(crate) fn spawn_level(
                 'C' => spawn_block(commands, meshes, materials, Tile::Coin, (j, i)),
                 'J' => spawn_block(commands, meshes, materials, Tile::Bounce, (j, i)),
                 'M' => spawn_block(commands, meshes, materials, Tile::Moving, (j, i)),
+                'N' => spawn_block(commands, meshes, materials, Tile::Checkpoint, (j, i)),
                 'P' => {
+                    let spawn_location = (j as f32 * TILE_SIZE, i as f32 * TILE_SIZE, 1.0);
                     // Draw player
                     commands.spawn((
                         Sprite::from_color(
                             Color::srgb(0.95, 0.35, 0.25),
                             PLAYER_SIZE,
                         ),
-                        Transform::from_xyz(j as f32 * TILE_SIZE, i as f32 * TILE_SIZE, 1.0),
+                        Transform::from_xyz(spawn_location.0, spawn_location.1, spawn_location.2),
                         Player,
                         GameEntity,
-                        Movement {
+                        PlayerMovement {
                             velocity: vec2(0.0, 0.0),
                             speed_multiplier: 1.0,
                             number_of_jumps: 0,
                             coyote_time_remaining: 0.0,
+                            // Default respawn location to default world spawn
+                            respawn_location: vec2(spawn_location.0, spawn_location.1),
                         },
-                        Health::new(2),
+                        Health::new(4),
                         DamageCooldown::new(1.0),
                         DamageFlash::new(0.15),
                     ));
                 }
-                _ => ()
+                _ => () // Ignore other characters like the '.' for air
             }
         }
     }
@@ -198,15 +214,11 @@ pub(crate)fn spawn_block(
         0.0,
     );
 
-    // Coins need different stuff apparently
+    // It's harder to do different shapes I guess
     if attributes.is_circle {
         let mesh = meshes.add(Circle::new(TILE_SIZE / 2.0));
         let material = materials.add(ColorMaterial::from(
-            Color::srgb(
-                attributes.color.0,
-                attributes.color.1,
-                attributes.color.2,
-            )
+            Color::srgb(attributes.color.0, attributes.color.1, attributes.color.2)
         ));
 
         commands.spawn((
@@ -218,13 +230,10 @@ pub(crate)fn spawn_block(
         ));
     } else {
         let sprite = Sprite::from_color(
-            Color::srgb(
-                attributes.color.0,
-                attributes.color.1,
-                attributes.color.2,
-            ),
+            Color::srgb(attributes.color.0, attributes.color.1, attributes.color.2),
             vec2(TILE_SIZE, TILE_SIZE),
         );
+        // Solid tiles have a different attribute
         if attributes.is_solid {
             // If moving tile
             if let Some((dx, dy)) = attributes.movement_translate_pos {
@@ -252,12 +261,22 @@ pub(crate)fn spawn_block(
                 ));
             }
         } else {
-            commands.spawn((
-                sprite,
-                transform,
-                tile,
-                GameEntity,
-            ));
+            if tile == Tile::Checkpoint {
+                commands.spawn((
+                    sprite,
+                    transform,
+                    Checkpoint,
+                    tile,
+                    GameEntity,
+                ));
+            } else {
+                commands.spawn((
+                    sprite,
+                    transform,
+                    tile,
+                    GameEntity,
+                ));
+            }
         }
     }
 }
@@ -268,6 +287,7 @@ pub(crate)fn move_tiles(
 ) {
     // Time for tile to move one cycle
     let phase = time.elapsed_secs() * MOVING_TILE_SPEED;
+
     // Offset sin function to influence distance moved
     let offset = phase.sin() * MOVING_TILE_DISTANCE;
 

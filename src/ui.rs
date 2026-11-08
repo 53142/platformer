@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use crate::levels::LEVELS;
 
 use crate::components::{
     CurrentLevel,
@@ -15,6 +16,7 @@ use crate::components::{
     Score,
     ScoreText,
     TimerText,
+    LevelText,
 };
 
 use crate::tiles::spawn_level;
@@ -24,9 +26,11 @@ pub(crate) fn update_game_ui(
     player: Query<&Health, With<Player>>,
     score: Res<Score>,
     timer: Res<GameTimer>,
-    mut health_text: Query<&mut Text, (With<HealthText>, Without<ScoreText>, Without<TimerText>)>,
-    mut score_text: Query<&mut Text, (With<ScoreText>, Without<HealthText>, Without<TimerText>)>,
-    mut timer_text: Query<&mut Text, (With<TimerText>, Without<HealthText>, Without<ScoreText>)>,
+    level: Res<CurrentLevel>,
+    mut health_text: Query<&mut Text, (With<HealthText>, Without<ScoreText>, Without<TimerText>, Without<LevelText>)>,
+    mut score_text: Query<&mut Text, (With<ScoreText>, Without<HealthText>, Without<TimerText>, Without<LevelText>)>,
+    mut timer_text: Query<&mut Text, (With<TimerText>, Without<HealthText>, Without<ScoreText>, Without<LevelText>)>,
+    mut level_text: Query<&mut Text, (With<LevelText>, Without<HealthText>, Without<ScoreText>, Without<TimerText>)>,
 ) {
     let Ok(health) = player.single() else { return; };
 
@@ -39,6 +43,9 @@ pub(crate) fn update_game_ui(
     if let Ok(mut text) = timer_text.single_mut() {
         // 1 decimal points looks cool lol
         text.0 = format!("Time: {:.1}s", timer.0);
+    }
+    if let Ok(mut text) = level_text.single_mut() {
+        text.0 = format!("Level: {} / {}", level.0 + 1, LEVELS.len())
     }
 }
 
@@ -125,7 +132,7 @@ pub(crate) fn restart_button_system(
     end_screens: Query<Entity, With<EndScreenRoot>>,
     mut score: ResMut<Score>,
     mut timer: ResMut<GameTimer>,
-    current_level: ResMut<CurrentLevel>,
+    mut current_level: ResMut<CurrentLevel>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     let mut restart_requested = false;
@@ -159,8 +166,9 @@ pub(crate) fn restart_button_system(
     // Reset score
     score.0 = 0;
     timer.0 = 0.0;
-    // Prob shouldn't reset to first level?
-    // current_level.0 = 0;
+
+    // Reset to first level again
+    current_level.0 = 0;
 
     // Spawn new level including: player, tiles, and coins
     spawn_level(&mut commands, &mut meshes, &mut materials, &current_level);

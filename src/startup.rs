@@ -1,11 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::{
-    CurrentLevel,
-    HealthText,
-    ScoreText,
-    TimerText,
-    GameTimer,
+    CurrentLevel, GameTimer, HealthText, LevelText, ScoreText, TimerText,
 };
 
 use crate::tiles::spawn_level;
@@ -51,6 +47,19 @@ pub(crate) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mu
             ..default()
         },
         TimerText,
+    ));
+
+    // Level text
+    commands.spawn((
+        Text::new("Level: 0 / 0"),
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(12),
+            left: Val::Percent(65.0),
+            ..default()
+        },
+        LevelText,
     ));
 
     // Create level
