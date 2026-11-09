@@ -22,6 +22,9 @@ use crate::levels::LEVELS;
 
 use crate::tiles::{ Tile, TileAttributes, spawn_level };
 
+#[derive(Component)]
+pub(crate) struct ActivatedCheckpoint;
+
 // Process tiles and other environment stuff
 pub(crate) fn process_environment(
     mut commands: Commands,
@@ -29,11 +32,12 @@ pub(crate) fn process_environment(
     time: Res<Time>,
     mut score: ResMut<Score>,
     mut player: Query<(&mut Transform, &mut PlayerMovement, &mut Lives, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
-    mut tiles: Query<(Entity, &Transform, Option<&mut Sprite>, Option<&MeshMaterial2d<ColorMaterial>>, &Tile), Without<Player>>,
+    mut tiles: Query<(Entity, &Transform, Option<&mut Sprite>, Option<&MeshMaterial2d<ColorMaterial>>, &Tile, Option<&ActivatedCheckpoint>), Without<Player>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     world_entities: Query<Entity, With<GameEntity>>,
     mut current_level: ResMut<CurrentLevel>,
     mut meshes: ResMut<Assets<Mesh>>,
+    active_checkpoints: Query<Entity, With<ActivatedCheckpoint>>,
 ) {
     let Ok((
         mut player_transform,
@@ -47,19 +51,20 @@ pub(crate) fn process_environment(
 
     // Make player die if they fall too far
     if player_transform.translation.y < FALL_DISTANCE_TO_DIE && !cooldown.active {
-        lives.remove_lives(1);
-
-        // Show damage flash
-        damage_flash.timer.reset();
-        damage_flash.active = true;
-
-        // Move player to last check point position
-        player_transform.translation.x = movement.respawn_location.x;
-        player_transform.translation.y = movement.respawn_location.y;
-
-        // Reset player movement
-        movement.velocity.x = 0.0;
-        movement.velocity.y = 0.0;
+        // Slightly sketchy but can technically use damage_player command with
+        // a custom tile attribute to process damage here
+        damage_player(
+          &mut lives,
+          TileAttributes {
+            damage: 1,
+            has_damage_cooldown: true,
+            ..Default::default()
+          },
+          &mut damage_flash,
+          &mut player_transform,
+          &mut movement,
+          &mut cooldown,
+        );
     }
 
     if cooldown.active {
@@ -71,24 +76,37 @@ pub(crate) fn process_environment(
 
     movement.speed_multiplier = 1.0;
 
-    for (entity, tile_transform, sprite_opt, material_opt, tile) in &mut tiles {
+    for (entity, tile_transform, sprite_opt, material_opt, tile, activated) in &mut tiles {
         let player_pos = player_transform.translation.truncate();
         let attributes = tile.attributes();
 
-        // Animate tiles (handles both sprites and mesh color materials)
-        if let (Some(target), Some(speed)) = (attributes.animate_color, attributes.animate_speed) {
-            let base = attributes.color;
-            let t = (time.elapsed_secs() * speed).sin() * 0.5 + 0.5;
+        // Animate tiles
+        // Determine tile color based on its attributes and activation state
+        if attributes.animate_color.is_some() || attributes.activated_color.is_some() {
 
-            let new_color = Color::srgb(
-                base.0 + (target.0 - base.0) * t,
-                base.1 + (target.1 - base.1) * t,
-                base.2 + (target.2 - base.2) * t
-            );
+            // Get original color
+            let base = if activated.is_some() {
+                attributes.activated_color.unwrap_or(attributes.color)
+            } else {
+                attributes.color
+            };
 
+            // Find animated color if it has it
+            let new_color = if let (Some(target), Some(speed)) = (attributes.animate_color, attributes.animate_speed) {
+                let t = (time.elapsed_secs() * speed).sin() * 0.5 + 0.5;
+                Color::srgb(
+                    base.0 + (target.0 - base.0) * t,
+                    base.1 + (target.1 - base.1) * t,
+                    base.2 + (target.2 - base.2) * t,
+                )
+            } else {
+                Color::srgb(base.0, base.1, base.2)
+            };
+
+            // Update sprite color
             if let Some(mut sprite) = sprite_opt {
                 sprite.color = new_color;
-            } else if let Some(mat_handle) = material_opt {
+            } else if let Some(mat_handle) = material_opt { // Update mesh material color idk if this is necessary
                 if let Some(mut material) = color_materials.get_mut(&mat_handle.0) {
                     material.color = new_color;
                 }
@@ -108,29 +126,40 @@ pub(crate) fn process_environment(
         // Actions to do for each tile the player touches
         match *tile {
           Tile::Win => {
-            increment_level(
-                &mut commands,
-                &mut current_level,
-                &world_entities,
-                &mut *meshes,
-                &mut *color_materials,
-                &mut next_state,
-                &mut player_transform,
-                &mut movement,
-                &mut cooldown,
-                &mut damage_flash,
-            );
-            break; // Don't need to process anything else if won
+              increment_level(
+                  &mut commands,
+                  &mut current_level,
+                  &world_entities,
+                  &mut *meshes,
+                  &mut *color_materials,
+                  &mut next_state,
+                  &mut player_transform,
+                  &mut movement,
+                  &mut cooldown,
+                  &mut damage_flash,
+              );
+              break; // Don't need to process anything else if won
           }
           Tile::Coin => {
-            score.0 += 1;
-            commands.entity(entity).despawn();
-            continue;
+              score.0 += 1;
+              commands.entity(entity).despawn();
+              continue;
           }
           Tile::Checkpoint => {
-            movement.respawn_location.x = tile_transform.translation.x;
-            movement.respawn_location.y = tile_transform.translation.y + PLAYER_SIZE.y / 2.0;
-            commands.entity(entity).despawn();
+            let new_player_pos = vec2(tile_transform.translation.x, tile_transform.translation.y + PLAYER_SIZE.y / 2.0 + TILE_SIZE / 2.0);
+
+            if movement.respawn_location != new_player_pos {
+                movement.respawn_location = new_player_pos;
+
+                // Deactivate other checkpoints
+                for checkpoint in &active_checkpoints {
+                    commands.entity(checkpoint).remove::<ActivatedCheckpoint>();
+                }
+
+                // Add ActivatedCheckpoint component to change the color of the checkpoint
+                commands.entity(entity).insert(ActivatedCheckpoint);
+            }
+
             continue;
           }
           _ => {}
@@ -159,11 +188,7 @@ fn damage_player(
     damage_flash.active = true;
 
     // Respawn at checkpoint
-    player_transform.translation.x =
-        movement.respawn_location.x;
-
-    player_transform.translation.y =
-        movement.respawn_location.y;
+    player_transform.translation = movement.respawn_location.extend(1.0);
 
     // Reset movement
     movement.velocity = Vec2::ZERO;

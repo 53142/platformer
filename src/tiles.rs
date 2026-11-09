@@ -30,6 +30,7 @@ pub(crate) struct TileAttributes {
     pub(crate) movement_distance: f32, // Will implement later; will allow for manually adjusting tile's movement attributes
     pub(crate) movement_speed: f32, // Will implement later; will allow for manually adjusting tile's movement attributes
     pub(crate) is_solid: bool, // Whether or not collisions with other entities occur
+    pub(crate) activated_color: Option<(f32, f32, f32)>, // Color of checkpoint when activated
 }
 
 // Make it so you don't have to type every single attribute all the time
@@ -48,6 +49,7 @@ impl Default for TileAttributes {
             movement_distance: 0.0,
             movement_speed: 0.0,
             is_solid: true,
+            activated_color: None,
         }
     }
 }
@@ -121,8 +123,8 @@ impl Tile {
                 ..Default::default()
             },
             Tile::Checkpoint => TileAttributes {
-              color: (0.0, 0.0, 0.0),
-              animate_color: Some((1.0, 1.0, 1.0)),
+              color: (0.3, 0.3, 0.3), // Inactive color
+              activated_color: Some((0.0, 1.0, 0.0)), // Activated color
               animate_speed: Some(2.0),
               is_solid: false,
               is_circle: true,
