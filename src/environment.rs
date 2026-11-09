@@ -5,16 +5,17 @@ use crate::components::{
     DamageCooldown,
     DamageFlash,
     GameEntity,
-    GameState,
     Lives,
     PlayerMovement,
     Player,
+    GameState,
     Score,
 };
 
+use crate::player::reset_player_position;
+
 use crate::constants::{
-    PLAYER_SIZE,
-    TILE_SIZE,
+    FALL_DISTANCE_TO_DIE, PLAYER_SIZE, TILE_SIZE,
 };
 
 use crate::levels::LEVELS;
@@ -34,24 +35,44 @@ pub(crate) fn process_environment(
     mut current_level: ResMut<CurrentLevel>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let Ok((mut player_transform, mut movement, mut health, mut cooldown, mut damage_flash)) = player.single_mut()
-    else {
+    let Ok((
+        mut player_transform,
+        mut movement,
+        mut lives,
+        mut cooldown,
+        mut damage_flash,
+    )) = player.single_mut() else {
         return;
     };
 
+    // Make player die if they fall too far
+    if player_transform.translation.y < FALL_DISTANCE_TO_DIE && !cooldown.active {
+        lives.remove_lives(1);
+
+        // Show damage flash
+        damage_flash.timer.reset();
+        damage_flash.active = true;
+
+        // Move player to last check point position
+        player_transform.translation.x = movement.respawn_location.x;
+        player_transform.translation.y = movement.respawn_location.y;
+
+        // Reset player movement
+        movement.velocity.x = 0.0;
+        movement.velocity.y = 0.0;
+    }
+
     if cooldown.active {
         cooldown.timer.tick(time.delta());
-
         if cooldown.timer.is_finished() {
             cooldown.active = false;
         }
     }
 
-    let player_pos = player_transform.translation.truncate();
-
     movement.speed_multiplier = 1.0;
 
     for (entity, tile_transform, sprite_opt, material_opt, tile) in &mut tiles {
+        let player_pos = player_transform.translation.truncate();
         let attributes = tile.attributes();
 
         // Animate tiles (handles both sprites and mesh color materials)
@@ -87,7 +108,18 @@ pub(crate) fn process_environment(
         // Actions to do for each tile the player touches
         match *tile {
           Tile::Win => {
-            increment_level(&mut commands, &mut current_level, &world_entities, &mut meshes, &mut color_materials, &mut next_state);
+            increment_level(
+                &mut commands,
+                &mut current_level,
+                &world_entities,
+                &mut *meshes,
+                &mut *color_materials,
+                &mut next_state,
+                &mut player_transform,
+                &mut movement,
+                &mut cooldown,
+                &mut damage_flash,
+            );
             break; // Don't need to process anything else if won
           }
           Tile::Coin => {
@@ -96,75 +128,96 @@ pub(crate) fn process_environment(
             continue;
           }
           Tile::Checkpoint => {
-            // TODO: Eventually have a way to not reset spawn location if user touches old spawn point (user somehow fell or something and contacted old spawn location)
             movement.respawn_location.x = tile_transform.translation.x;
             movement.respawn_location.y = tile_transform.translation.y + PLAYER_SIZE.y / 2.0;
             commands.entity(entity).despawn();
             continue;
-          }
-          Tile::Enemy => {
-            health.remove_lives(1)
           }
           _ => {}
         }
 
         // If tile damages and player cooldown is inactive/tile doesn't have cooldown, damage player
         // Or if player falls too far damage them
-        if (attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown)) || player_transform.translation.y < 200.0 {
-          damage_player(&mut health, attributes, &mut damage_flash, &mut player_transform, &mut movement, &mut cooldown);
+        if attributes.damage > 0 && (!cooldown.active || !attributes.has_damage_cooldown) {
+          damage_player(&mut lives, attributes, &mut damage_flash, &mut player_transform, &mut movement, &mut cooldown);
+          break;
         }
     }
 }
 
 fn damage_player(
-    health: &mut Lives,
+    lives: &mut Lives,
     attributes: TileAttributes,
     damage_flash: &mut DamageFlash,
     player_transform: &mut Transform,
     movement: &mut PlayerMovement,
     cooldown: &mut DamageCooldown,
 ) {
-      health.remove_lives(attributes.damage);
-      damage_flash.timer.reset();
-      damage_flash.active = true;
+    lives.remove_lives(attributes.damage);
 
-      // Move player to last check point position
-      player_transform.translation.x = movement.respawn_location.x;
-      player_transform.translation.y = movement.respawn_location.y;
+    damage_flash.timer.reset();
+    damage_flash.active = true;
 
-      // Reset player movement
-      movement.velocity.x = 0.0;
-      movement.velocity.y = 0.0;
+    // Respawn at checkpoint
+    player_transform.translation.x =
+        movement.respawn_location.x;
 
-      if attributes.has_damage_cooldown {
-          cooldown.timer.reset();
-          cooldown.active = true;
-      }
+    player_transform.translation.y =
+        movement.respawn_location.y;
+
+    // Reset movement
+    movement.velocity = Vec2::ZERO;
+    movement.number_of_jumps = 0;
+    movement.coyote_time_remaining = 0.0;
+
+    if attributes.has_damage_cooldown {
+        cooldown.timer.reset();
+        cooldown.active = true;
     }
+}
 
 pub(crate) fn increment_level(
-    mut commands: &mut Commands,
-    current_level: &mut ResMut<CurrentLevel>,
+    commands: &mut Commands,
+    current_level: &mut CurrentLevel,
     world_entities: &Query<Entity, With<GameEntity>>,
-    mut meshes: &mut ResMut<Assets<Mesh>>,
-    mut color_materials: &mut ResMut<Assets<ColorMaterial>>,
-    next_state: &mut ResMut<NextState<GameState>>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    next_state: &mut NextState<GameState>,
+    player_transform: &mut Transform,
+    movement: &mut PlayerMovement,
+    cooldown: &mut DamageCooldown,
+    flash: &mut DamageFlash,
 ) {
-    if current_level.0 + 1 < LEVELS.len() {
-        current_level.0 += 1;
-
-        // Despawn current world entities
-        for entity in world_entities {
-            commands.entity(entity).despawn();
-        }
-
-        spawn_level(
-            &mut commands,
-            &mut meshes,
-            &mut color_materials,
-            &*current_level,
-        );
-    } else {
+    // Check whether another level exists
+    if current_level.0 + 1 >= LEVELS.len() {
         next_state.set(GameState::GameWon);
+        return;
     }
+
+    current_level.0 += 1;
+
+    // Despawn old level entities, but NOT the player
+    for entity in world_entities.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    // Spawn next level
+    let Some(spawn_position) = spawn_level(
+        commands,
+        meshes,
+        materials,
+        current_level,
+    ) else {
+        error!("Failed to spawn next level!");
+        return;
+    };
+
+    // Reset player position and movement
+    reset_player_position(
+        player_transform,
+        movement,
+        cooldown,
+        flash,
+        spawn_position,
+    );
 }

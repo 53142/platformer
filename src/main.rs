@@ -21,7 +21,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Platformer Game".into(),
-                resolution: (960, 540).into(),
+                mode: bevy::window::WindowMode::Windowed,
                 ..default()
             }),
             ..default()
@@ -40,6 +40,7 @@ fn main() {
                 startup::tick_game_timer,
                 player::process_controls,
                 tiles::move_tiles,
+                tiles::move_enemies,
                 player::move_player,
                 environment::process_environment,
                 player::check_game_over,

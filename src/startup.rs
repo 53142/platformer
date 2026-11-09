@@ -4,7 +4,7 @@ use crate::components::{
     CurrentLevel, GameTimer, HealthText, LevelText, ScoreText, TimerText,
 };
 
-use crate::tiles::spawn_level;
+use crate::tiles::{spawn_level, spawn_player};
 
 pub(crate) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>, current_level: Res<CurrentLevel>) {
     // Spawn camera
@@ -63,7 +63,14 @@ pub(crate) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mu
     ));
 
     // Spawn level
-    spawn_level(&mut commands, &mut meshes, &mut materials, &*current_level);
+    if let Some(spawn_position) = spawn_level(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &current_level,
+    ) {
+        spawn_player(&mut commands, spawn_position);
+    }
 }
 
 pub(crate) fn tick_game_timer(time: Res<Time>, mut timer: ResMut<GameTimer>) {

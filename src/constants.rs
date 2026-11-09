@@ -8,5 +8,13 @@ pub(crate) const MOVING_TILE_DISTANCE: f32 = TILE_SIZE * 3.0;
 // Speed of moving tile - controls how long it takes to move a specific distance
 pub(crate) const MOVING_TILE_SPEED: f32 = 1.5;
 
+// Total distance moving tile moves (moves half of this value in each direction)
+pub(crate) const ENEMY_MOVING_DISTANCE: f32 = TILE_SIZE * 3.0;
+// Speed of moving tile - controls how long it takes to move a specific distance
+pub(crate) const ENEMY_MOVING_SPEED: f32 = 1.5;
+
 // Give player grace period to jump after walking off edge
 pub(crate) const COYOTE_TIME: f32 = 0.1;
+
+// Location the player needs to be below in order to die
+pub(crate) const FALL_DISTANCE_TO_DIE: f32 = -100.0;

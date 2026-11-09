@@ -11,13 +11,10 @@ use crate::components::{
 };
 
 use crate::constants::{
-    PLAYER_SIZE,
-    TILE_SIZE,
-    MOVING_TILE_DISTANCE,
-    MOVING_TILE_SPEED,
+    ENEMY_MOVING_DISTANCE, ENEMY_MOVING_SPEED, MOVING_TILE_DISTANCE, MOVING_TILE_SPEED, PLAYER_SIZE, TILE_SIZE,
 };
 
-use crate::levels::{LEVEL_1, LEVELS};
+use crate::levels::LEVELS;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TileAttributes {
@@ -66,7 +63,8 @@ pub(crate)enum Tile {
     Bounce,
     Moving,
     Checkpoint,
-    Enemy,
+    HorizontalEnemy,
+    VerticalEnemy,
     Win, // Tile that user needs to contact to win the game
 }
 impl Tile {
@@ -130,9 +128,18 @@ impl Tile {
               is_circle: true,
               ..Default::default()
             },
-            Tile::Enemy => TileAttributes {
+            Tile::HorizontalEnemy => TileAttributes {
                 color: (0.0, 0.0, 1.0),
                 is_solid: false,
+                movement_translate_pos: Some((1, 0)),
+                damage: 1,
+                ..Default::default()
+            },
+            Tile::VerticalEnemy => TileAttributes {
+                color: (0.0, 0.0, 1.0),
+                is_solid: false,
+                movement_translate_pos: Some((0, 1)),
+                damage: 1,
                 ..Default::default()
             }
         }
@@ -156,14 +163,28 @@ pub(crate) struct MovingTileMotion {
     pub(crate) previous_translation: Vec3,
 }
 
+#[derive(Component)]
+pub(crate) struct EnemyMotion {
+    origin: Vec3,
+    direction: Vec2,
+    pub(crate) previous_translation: Vec3,
+}
+
 // Read tilemap to spawn all tiles
+// Returns player position
 pub(crate) fn spawn_level(
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<ColorMaterial>>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
     current_level: &CurrentLevel,
-) {
-    let level = LEVELS.get(current_level.0).unwrap_or(&LEVEL_1);
+) -> Option<Vec2> {
+    let Some(level) = LEVELS.get(current_level.0) else {
+        error!("Invalid level index: {}", current_level.0);
+        return None;
+    };
+
+    let mut player_spawn: Option<Vec2> = None;
+
     for (i, row) in level.iter().rev().enumerate() {
         for (j, cell) in row.chars().enumerate() {
             match cell {
@@ -173,46 +194,40 @@ pub(crate) fn spawn_level(
                 'L' => spawn_tile(commands, meshes, materials, Tile::Lava, (j, i)),
                 'B' => spawn_tile(commands, meshes, materials, Tile::Bedrock, (j, i)),
                 'W' => spawn_tile(commands, meshes, materials, Tile::Win, (j, i)),
-                'C' => spawn_tile(commands, meshes, materials, Tile::Coin, (j, i)), // TODO: DO CHECKPOINTS RESPAWN PLAYER AT THEIR COORDS EVEN AFTER LEVEL CHANGE?
+                'C' => spawn_tile(commands, meshes, materials, Tile::Coin, (j, i)),
                 'J' => spawn_tile(commands, meshes, materials, Tile::Bounce, (j, i)),
                 'M' => spawn_tile(commands, meshes, materials, Tile::Moving, (j, i)),
                 'N' => spawn_tile(commands, meshes, materials, Tile::Checkpoint, (j, i)),
-                'E' => spawn_tile(commands, meshes, materials, Tile::Enemy, (j, i)),
+                'H' => spawn_tile(commands, meshes, materials, Tile::HorizontalEnemy, (j, i)),
+                'V' => spawn_tile(commands, meshes, materials, Tile::VerticalEnemy, (j, i)),
                 'P' => {
-                    let spawn_location = (j as f32 * TILE_SIZE, i as f32 * TILE_SIZE, 1.0);
-                    // Draw player
-                    commands.spawn((
-                        Sprite::from_color(
-                            Color::srgb(0.95, 0.35, 0.25),
-                            PLAYER_SIZE,
-                        ),
-                        Transform::from_xyz(spawn_location.0, spawn_location.1, spawn_location.2),
-                        Player,
-                        GameEntity,
-                        PlayerMovement {
-                            velocity: vec2(0.0, 0.0),
-                            speed_multiplier: 1.0,
-                            number_of_jumps: 0,
-                            coyote_time_remaining: 0.0,
-                            // Default respawn location to default world spawn
-                            respawn_location: vec2(spawn_location.0, spawn_location.1),
-                        },
-                        Lives::new(30),
-                        DamageCooldown::new(1.0),
-                        DamageFlash::new(0.15),
-                    ));
+                    let position = vec2(
+                        j as f32 * TILE_SIZE,
+                        i as f32 * TILE_SIZE + PLAYER_SIZE.y / 2.0,
+                    );
+
+                    // Check for multiple spawn locations
+                    if player_spawn.is_some() {
+                        error!("Level contains multiple player spawn points!");
+                    } else {
+                        player_spawn = Some(position);
+                    }
+
                 }
-                _ => () // Ignore other characters
+                _ => {
+                    error!("Unknown tile character: {}", cell);
+                }
             }
         }
     }
+    player_spawn
 }
 
 // Helper function to create the entity for a tile
 pub(crate)fn spawn_tile(
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<ColorMaterial>>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
     tile: Tile,
     dims: (usize, usize)
 ) {
@@ -270,7 +285,7 @@ pub(crate)fn spawn_tile(
                     GameEntity,
                 ));
             }
-        } else { // tile not solid
+        } else { // If tile not slide
             if tile == Tile::Checkpoint {
                 commands.spawn((
                     sprite,
@@ -279,14 +294,23 @@ pub(crate)fn spawn_tile(
                     tile,
                     GameEntity,
                 ));
-            } else if tile == Tile::Enemy {
-                commands.spawn((
-                    sprite,
-                    transform,
-                    Enemy,
-                    tile,
-                    GameEntity,
-                ));
+            } else if tile == Tile::HorizontalEnemy || tile == Tile::VerticalEnemy {
+                if let Some((dx, dy)) = attributes.movement_translate_pos {
+                    let enemy_motion = EnemyMotion {
+                        origin: transform.translation,
+                        direction: Vec2::new(dx as f32, dy as f32).normalize_or_zero(),
+                        previous_translation: transform.translation,
+                    };
+
+                    commands.spawn((
+                        sprite,
+                        transform,
+                        Enemy,
+                        tile,
+                        GameEntity,
+                        enemy_motion,
+                    ));
+                }
             } else {
                 commands.spawn((
                     sprite,
@@ -299,7 +323,32 @@ pub(crate)fn spawn_tile(
     }
 }
 
-pub(crate)fn move_tiles(
+pub(crate) fn spawn_player(commands: &mut Commands, spawn_position: Vec2) {
+    commands.spawn((
+        Sprite::from_color(
+            Color::srgb(0.95, 0.35, 0.25),
+            PLAYER_SIZE,
+        ),
+        Transform::from_xyz(
+            spawn_position.x,
+            spawn_position.y,
+            1.0,
+        ),
+        Player,
+        PlayerMovement {
+            velocity: Vec2::ZERO,
+            speed_multiplier: 1.0,
+            number_of_jumps: 0,
+            coyote_time_remaining: 0.0,
+            respawn_location: spawn_position,
+        },
+        Lives::new(30),
+        DamageCooldown::new(1.0),
+        DamageFlash::new(0.15),
+    ));
+}
+
+pub(crate) fn move_tiles(
     time: Res<Time>,
     mut tiles: Query<(&mut Transform, &mut MovingTileMotion)>,
 ) {
@@ -311,6 +360,23 @@ pub(crate)fn move_tiles(
 
     // Move offset distance
     for (mut transform, mut motion) in &mut tiles {
+        motion.previous_translation = transform.translation;
+        transform.translation = motion.origin + Vec3::new(motion.direction.x * offset, motion.direction.y * offset, 0.0);
+    }
+}
+
+pub(crate) fn move_enemies(
+    time: Res<Time>,
+    mut enemies: Query<(&mut Transform, &mut EnemyMotion)>,
+) {
+    // Time for tile to move one cycle
+    let phase = time.elapsed_secs() * ENEMY_MOVING_SPEED;
+
+    // Offset sin function to influence distance moved
+    let offset = phase.sin() * ENEMY_MOVING_DISTANCE;
+
+    // Move offset distance
+    for (mut transform, mut motion) in &mut enemies {
         motion.previous_translation = transform.translation;
         transform.translation = motion.origin + Vec3::new(motion.direction.x * offset, motion.direction.y * offset, 0.0);
     }

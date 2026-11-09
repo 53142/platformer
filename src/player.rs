@@ -2,6 +2,8 @@ use bevy::prelude::*;
 
 use crate::components::{
     CurrentLevel,
+    DamageCooldown,
+    DamageFlash,
     GameEntity,
     Lives,
     PlayerMovement,
@@ -25,14 +27,14 @@ use crate::tiles::{
 pub(crate) fn process_controls(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut player: Query<&mut PlayerMovement, With<Player>>,
+    mut player: Query<(&mut Transform, &mut PlayerMovement, &mut DamageCooldown, &mut DamageFlash), With<Player>>,
     mut current_level: ResMut<CurrentLevel>,
     world_entities: Query<Entity, With<GameEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    let Ok(mut movement) = player.single_mut() else {
+    let Ok((mut player_transform, mut movement, mut cooldown, mut flash)) = player.single_mut() else {
         return;
     };
 
@@ -63,7 +65,20 @@ pub(crate) fn process_controls(
 
     // Skip level
     if keyboard.just_pressed(KeyCode::Semicolon) {
-        increment_level(&mut commands, &mut current_level, &world_entities, &mut meshes, &mut color_materials, &mut next_state);
+        increment_level(
+            &mut commands,
+            &mut current_level,
+            &world_entities,
+            &mut *meshes,
+            &mut *color_materials,
+            &mut next_state,
+            &mut player_transform,
+            &mut movement,
+            &mut cooldown,
+            &mut flash,
+        );
+
+        return;
     }
 }
 
@@ -237,6 +252,29 @@ pub(crate) fn move_player(time: Res<Time>, mut player: Query<(&mut Transform, &m
         camera_transform.translation.x += (player_transform.translation.x - camera_transform.translation.x) * smoothing;
         camera_transform.translation.y += (player_transform.translation.y - camera_transform.translation.y) * smoothing;
     }
+}
+
+pub(crate) fn reset_player_position(
+    transform: &mut Transform,
+    movement: &mut PlayerMovement,
+    cooldown: &mut DamageCooldown,
+    flash: &mut DamageFlash,
+    spawn_position: Vec2,
+) {
+    transform.translation.x = spawn_position.x;
+    transform.translation.y = spawn_position.y;
+
+    movement.velocity = Vec2::ZERO;
+    movement.speed_multiplier = 1.0;
+    movement.number_of_jumps = 0;
+    movement.coyote_time_remaining = 0.0;
+    movement.respawn_location = spawn_position;
+
+    cooldown.active = false;
+    cooldown.timer.reset();
+
+    flash.active = false;
+    flash.timer.reset();
 }
 
 // Check if player dead, if so queue death screen

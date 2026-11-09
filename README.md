@@ -24,11 +24,17 @@ The player's health is displayed in the top-left of the screen and the score (nu
 Go to the releases tab in Github and find the latest release. There is a windows binary (exe file) for windows machines. Unfortunately, if you are using a different operating system like linux, you will have to git clone this repo and use cargo to compile the code yourself.
 
 ## Pictures
-1st level screenshot
+1st level
 ![1st Level Picture](image-4.png)
 
-Part of 2nd level screenshot
+Part of 2nd level
 ![Part of 2nd Level Picture](image-5.png)
+
+Part of 3rd level
+![Part of 3rd Level Picture](image-7.png)
+
+Part of 4th level
+![Part of 4th Level Picture](image-6.png)
 
 Win Screen
 ![Win Screen](image-2.png)
