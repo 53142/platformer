@@ -7,10 +7,10 @@ use crate::components::{
 use crate::tiles::spawn_level;
 
 pub(crate) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>, current_level: Res<CurrentLevel>) {
-    // Make camera
+    // Spawn camera
     commands.spawn(Camera2d);
 
-    // Make health text
+    // Spawn health text
     commands.spawn((
         Text::new("Health: 0 / 0"),
         TextColor(Color::WHITE),
@@ -23,9 +23,35 @@ pub(crate) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mu
         HealthText,
     ));
 
-    // Make score text
+    // Spawn level text
+    commands.spawn((
+        Text::new("Level: 0 / 0"),
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(12),
+            left: Val::Percent(40.0),
+            ..default()
+        },
+        LevelText,
+    ));
+
+    // Spawn score text
     commands.spawn((
         Text::new("Score: 0"),
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(12),
+            left: Val::Percent(60.0),
+            ..default()
+        },
+        ScoreText,
+    ));
+
+    // Spawn timer text
+    commands.spawn((
+        Text::new("Time: 0.0s"),
         TextColor(Color::WHITE),
         Node {
             position_type: PositionType::Absolute,
@@ -33,36 +59,10 @@ pub(crate) fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mu
             right: px(12),
             ..default()
         },
-        ScoreText,
-    ));
-
-    // Timer text
-    commands.spawn((
-        Text::new("Time: 0.0s"),
-        TextColor(Color::WHITE),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(12),
-            left: Val::Percent(45.0),
-            ..default()
-        },
         TimerText,
     ));
 
-    // Level text
-    commands.spawn((
-        Text::new("Level: 0 / 0"),
-        TextColor(Color::WHITE),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(12),
-            left: Val::Percent(65.0),
-            ..default()
-        },
-        LevelText,
-    ));
-
-    // Create level
+    // Spawn level
     spawn_level(&mut commands, &mut meshes, &mut materials, &*current_level);
 }
 

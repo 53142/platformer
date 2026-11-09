@@ -197,12 +197,12 @@ pub(crate) fn spawn_level(
                             // Default respawn location to default world spawn
                             respawn_location: vec2(spawn_location.0, spawn_location.1),
                         },
-                        Lives::new(100),
+                        Lives::new(30),
                         DamageCooldown::new(1.0),
                         DamageFlash::new(0.15),
                     ));
                 }
-                _ => () // Ignore other characters like the '.' for air
+                _ => () // Ignore other characters
             }
         }
     }
